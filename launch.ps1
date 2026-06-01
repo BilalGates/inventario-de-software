@@ -1,0 +1,3 @@
+$env:SHIBOKEN_DISABLE="1"
+$env:PYDEVD_DISABLE_FILE_VALIDATION="1"
+python main.py
