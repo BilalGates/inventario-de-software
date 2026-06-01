@@ -22,17 +22,9 @@ EXPORT_COLUMNS = [
 ]
 
 
-def _bool_label(value):
-    if value is None:
-        return None
-    return "Sí" if bool(value) else "No"
-
-
 def _cell_value(value):
     if isinstance(value, bool):
-        return _bool_label(value)
-    if value in (0, 1):
-        return _bool_label(value)
+        return "Sí" if value else "No"
     return value
 
 
@@ -220,6 +212,7 @@ def generar_excel_completo(db) -> bytes:
         ("id", "ID"),
         ("departamento_nombre", "Departamento"),
         ("nombre", "Dispositivo"),
+        ("es_servidor", "¿Servidor?"),
         ("notas", "Usuario"),
         ("tipo_dispositivo", "Tipo dispositivo"),
         ("marca_modelo", "Marca / Modelo"),
@@ -261,7 +254,7 @@ def generar_excel_completo(db) -> bytes:
     ]
     servidor_equipos = listar_equipos(db, es_servidor=True)
     if servidor_equipos:
-        ws_serv = wb.create_sheet("Servidores - Dispositivos")
+        ws_serv = wb.create_sheet("Servidores")
         servidor_rows = []
         for e in servidor_equipos:
             row = [_cell_value(e.get(key)) for key, _ in servidor_columns]

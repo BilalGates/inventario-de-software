@@ -102,6 +102,7 @@ def generar_codigo_software(db, departamento_id: int) -> str:
     if not dept:
         raise ValueError("Departamento no encontrado")
     prefix = dept["prefijo_id"]
+    # FOR UPDATE bloquea las filas hasta que la transaccion termine.
     rows = db.execute(
         text(
             """
@@ -109,6 +110,7 @@ def generar_codigo_software(db, departamento_id: int) -> str:
             FROM software
             WHERE departamento_id = :departamento_id
               AND codigo LIKE :like_prefix
+            FOR UPDATE
             """
         ),
         {"departamento_id": departamento_id, "like_prefix": f"{prefix}-%"},
@@ -389,6 +391,39 @@ def dashboard_metricas(db) -> dict:
                     FROM software s
                     WHERE s.activo = TRUE
                       AND NOT {_has_active_device_sql()}
+                    """
+                )
+            ).scalar()
+            or 0
+        ),
+        "autorizado_pendiente_promocion": int(
+            db.execute(
+                text(
+                    """
+                    SELECT COUNT(*)
+                    FROM software_autorizado sa
+                    WHERE COALESCE(sa.activo, TRUE) = TRUE
+                      AND sa.software_id IS NOT NULL
+                      AND (
+                          (
+                              SELECT COUNT(DISTINCT swe_chk.equipo_id)
+                              FROM software_equipo swe_chk
+                              JOIN equipos e_chk ON e_chk.id = swe_chk.equipo_id
+                              WHERE swe_chk.software_id = sa.software_id
+                                AND swe_chk.presente = TRUE
+                                AND e_chk.activo = TRUE
+                          ) >= 2
+                          OR EXISTS (
+                              SELECT 1
+                              FROM software_equipo swe
+                              JOIN equipos e ON e.id = swe.equipo_id
+                              WHERE swe.software_id = sa.software_id
+                                AND swe.presente = TRUE
+                                AND e.activo = TRUE
+                                AND COALESCE(swe.fecha_instalacion, swe.fecha_ultima_deteccion)
+                                    <= DATE_SUB(CURRENT_DATE, INTERVAL 90 DAY)
+                          )
+                      )
                     """
                 )
             ).scalar()

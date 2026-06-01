@@ -33,12 +33,20 @@ def dashboard() -> None:
     col1.metric("Equipos activos", metricas["equipos_activos"])
     col2.metric("Software activo", metricas["software_activo"])
     col3.metric("Importaciones este mes", metricas["importaciones_mes"])
-    col4.metric(
-        "Software sin dispositivo",
-        metricas["software_sin_dispositivo"],
-        delta="Revisar" if metricas["software_sin_dispositivo"] else None,
-        delta_color="inverse",
-    )
+    if metricas["autorizado_pendiente_promocion"] > 0:
+        col4.metric(
+            "Autorizados a revisar",
+            metricas["autorizado_pendiente_promocion"],
+            delta="Mover a inventario",
+            delta_color="inverse",
+        )
+    else:
+        col4.metric(
+            "Software sin dispositivo",
+            metricas["software_sin_dispositivo"],
+            delta="Revisar" if metricas["software_sin_dispositivo"] else None,
+            delta_color="inverse",
+        )
 
     st.subheader("Estado por departamento")
     dept_rows = []
@@ -85,6 +93,26 @@ def dashboard() -> None:
         file_name=f"Inventario_Asserta_Completo_{date.today().isoformat()}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
+
+
+# Promocion automatica al iniciar sesion (una vez por sesion)
+if not st.session_state.get("_promocion_ejecutada"):
+    try:
+        with get_engine().begin() as _db:
+            from modules.autorizado import promover_todos_los_pendientes
+
+            _result = promover_todos_los_pendientes(_db)
+            if _result["total"]:
+                st.toast(
+                    f"{_result['total']} programa(s) movidos al inventario del departamento "
+                    f"({_result['por_antiguedad']} por antiguedad, "
+                    f"{_result['por_multidevice']} por multiples dispositivos).",
+                    icon="ℹ️",
+                )
+    except Exception:
+        pass
+    finally:
+        st.session_state["_promocion_ejecutada"] = True
 
 
 navigation = st.navigation(

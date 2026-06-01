@@ -4,6 +4,7 @@ from datetime import date
 
 from sqlalchemy import text
 
+from modules.autorizado import promover_todos_los_pendientes
 from modules.software import generar_codigo_software
 from utils.normalizer import clean_version, normalize_nombre
 
@@ -538,4 +539,5 @@ def aplicar_diff(equipo_id, programas, diff, db, metodo) -> int:
             "n_cambios_version": len(diff["cambios_version"]),
         },
     )
+    promover_todos_los_pendientes(db)
     return int(result.lastrowid)

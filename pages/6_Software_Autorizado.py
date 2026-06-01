@@ -6,11 +6,13 @@ import streamlit as st
 from database.connection import get_engine
 from modules.autorizado import (
     actualizar_autorizado,
+    contar_pendientes_promocion,
     crear_autorizado,
     eliminar_autorizado,
     eliminar_autorizado_grupo,
     listar_autorizado_agrupado,
     listar_autorizado_detalle_grupo,
+    promover_todos_los_pendientes,
 )
 from modules.equipos import listar_equipos
 from modules.software import listar_departamentos
@@ -21,6 +23,7 @@ st.title("Software Autorizado")
 try:
     with get_engine().connect() as db:
         grouped_rows = listar_autorizado_agrupado(db)
+        pendientes_promocion = contar_pendientes_promocion(db)
         departamentos = listar_departamentos(db)
         all_equipos = []
         for dept in departamentos:
@@ -30,6 +33,22 @@ except Exception as exc:
     st.exception(exc)
     st.stop()
 
+if pendientes_promocion > 0:
+    st.warning(
+        f"**{pendientes_promocion} programa(s)** deben pasar al inventario del departamento "
+        f"(instalados en 2+ dispositivos o con mas de 3 meses de antiguedad). "
+        f"Pulsa el boton para actualizarlos."
+    )
+    if st.button("Mover al inventario de departamento", type="primary"):
+        with get_engine().begin() as db:
+            resultado = promover_todos_los_pendientes(db)
+        st.success(
+            f"Movidos al inventario: {resultado['total']} "
+            f"({resultado['por_antiguedad']} por antiguedad, "
+            f"{resultado['por_multidevice']} por multiples dispositivos)."
+        )
+        st.rerun()
+
 df = pd.DataFrame(grouped_rows)
 if df.empty:
     st.info("No hay software autorizado registrado.")
@@ -37,30 +56,33 @@ else:
     display = df.rename(
         columns={
             "nombre": "Programa",
-            "fabricantes": "Fabricantes",
-            "versiones": "Versiones disponibles",
+            "fabricantes": "Fabricante",
+            "versiones": "Versiones",
             "departamentos": "Departamentos",
-            "equipos_usuarios": "Equipos/Usuarios",
+            "equipos_usuarios": "Equipos / Usuarios",
+            "n_dispositivos": "Dispositivos",
             "observaciones": "Observaciones",
             "fecha_reciente": "Última autorización",
-            "registros": "Registros",
         }
     )
     st.dataframe(
         display[
             [
                 "Programa",
-                "Fabricantes",
-                "Versiones disponibles",
+                "Fabricante",
+                "Versiones",
                 "Departamentos",
-                "Equipos/Usuarios",
+                "Equipos / Usuarios",
+                "Dispositivos",
                 "Observaciones",
                 "Última autorización",
-                "Registros",
             ]
         ],
         hide_index=True,
         use_container_width=True,
+        column_config={
+            "Dispositivos": st.column_config.NumberColumn("Dispositivos", format="%d"),
+        },
     )
 
 with st.expander("Añadir software autorizado"):
@@ -100,7 +122,10 @@ with st.expander("Añadir software autorizado"):
 
 if grouped_rows:
     st.subheader("Detalle y edición")
-    group_options = {f"{row['nombre']} ({row['registros']} registros)": row["grupo"] for row in grouped_rows}
+    group_options = {
+        f"{row['nombre']} ({row.get('n_dispositivos', 0)} dispositivos)": row["grupo"]
+        for row in grouped_rows
+    }
     selected_label = st.selectbox("Programa autorizado", list(group_options.keys()))
     selected_group = group_options[selected_label]
     with get_engine().connect() as db:

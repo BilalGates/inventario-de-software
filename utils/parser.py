@@ -144,6 +144,8 @@ EQUIPO_COLUMN_MAP = {
     "ubicación": "ubicacion",
     "ubicacion": "ubicacion",
     "estado": "estado",
+    "es servidor": "es_servidor",
+    "servidor": "es_servidor",
     "observaciones": "notas",
     "coste": "coste",
     "fecha de adquisición": "fecha_adquisicion",
@@ -215,6 +217,9 @@ def _parse_equipo_value(db_field: str, raw: Any) -> Any:
         if norm in ("inactivo", "no", "false", "0"):
             return False
         return None
+    if db_field == "es_servidor":
+        norm = text.strip().lower()
+        return norm in ("sí", "si", "yes", "true", "1", "servidor", "server")
     return text
 
 

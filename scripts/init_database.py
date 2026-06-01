@@ -110,7 +110,12 @@ def initialize_database() -> None:
                 _execute_sql_file(cursor, migration)
 
 
+_ALLOWED_TABLES = frozenset({"software", "equipos", "departamentos", "importaciones", "software_autorizado"})
+
+
 def _table_count(table: str) -> int:
+    if table not in _ALLOWED_TABLES:
+        raise ValueError(f"Tabla no permitida: {table!r}")
     with _connect(DB_CONFIG["database"]) as connection:
         with connection.cursor() as cursor:
             cursor.execute(f"SELECT COUNT(*) FROM `{table}`")

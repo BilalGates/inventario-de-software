@@ -29,7 +29,7 @@ def listar_equipos(
             e.nombre,
             e.nombre_norm,
             e.activo,
-            e.es_servidor,
+            (e.es_servidor = TRUE OR d.codigo = 'servidores' OR LOWER(d.nombre) = 'servidores') AS es_servidor,
             e.fecha_alta,
             e.fecha_baja,
             e.notas,
@@ -84,32 +84,37 @@ def listar_equipos(
     if solo_activos:
         sql += " AND e.activo = TRUE"
     if es_servidor is not None:
-        sql += " AND e.es_servidor = :es_servidor"
-        params["es_servidor"] = es_servidor
+        server_expr = "(e.es_servidor = TRUE OR d.codigo = 'servidores' OR LOWER(d.nombre) = 'servidores')"
+        sql += f" AND {'NOT ' if not es_servidor else ''}{server_expr}"
     sql += " ORDER BY e.activo DESC, d.nombre ASC, e.nombre ASC"
-    return [dict(row) for row in db.execute(text(sql), params).mappings().all()]
+    rows = []
+    for row in db.execute(text(sql), params).mappings().all():
+        item = dict(row)
+        item["es_servidor"] = bool(item.get("es_servidor"))
+        rows.append(item)
+    return rows
 
 
 def _as_date(value) -> date | None:
     if value is None:
         return None
+    # Detectar NaN de pandas/float de forma explicita.
     try:
-        if value != value:
+        import math
+        if isinstance(value, float) and math.isnan(value):
             return None
-    except TypeError:
-        return None
+    except (TypeError, ValueError):
+        pass
     if isinstance(value, datetime):
         return value.date()
     if isinstance(value, date):
         return value
-    if hasattr(value, "date"):
-        converted = value.date()
+    if hasattr(value, "date") and callable(value.date):
         try:
-            if converted != converted:
-                return None
-        except TypeError:
+            result = value.date()
+            return result if isinstance(result, date) else None
+        except Exception:
             return None
-        return converted if isinstance(converted, date) else None
     return None
 
 
@@ -318,6 +323,9 @@ def _build_update_sql(equipo_id: int, data: dict) -> tuple[str, dict]:
     if "activo" in data:
         sets.append("activo = :activo")
         params["activo"] = bool(data["activo"])
+    if "es_servidor" in data:
+        sets.append("es_servidor = :es_servidor")
+        params["es_servidor"] = bool(data["es_servidor"])
     if data.get("coste") is not None:
         coste = _parse_cost(data["coste"])
         if coste is not None:
@@ -356,6 +364,16 @@ def importar_equipos_desde_lista(
             resultado["errores"].append(f"Departamento '{item.get('departamento_nombre')}' no encontrado para '{nombre}'")
             continue
 
+        is_server_department = dept_name == "servidores"
+        item = {
+            **item,
+            "es_servidor": is_server_department
+            or (
+                item.get("es_servidor")
+                if item.get("es_servidor") is not None
+                else es_servidor
+            ),
+        }
         nombre_norm = normalize_equipo_nombre(nombre)
         existente = db.execute(
             text(
@@ -394,7 +412,7 @@ def importar_equipos_desde_lista(
                     "norm": nombre_norm,
                     "notas": notas,
                     "activo": bool(activo),
-                    "es_servidor": es_servidor,
+                    "es_servidor": bool(item["es_servidor"]),
                 },
             )
             equipo_id = int(result.lastrowid)

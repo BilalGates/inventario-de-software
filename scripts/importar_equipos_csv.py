@@ -84,6 +84,18 @@ def parse_active(value: Any) -> bool:
     return (clean_text(value) or "").casefold() == "activo"
 
 
+def parse_bool_flag(value: Any) -> bool:
+    return (clean_text(value) or "").casefold() in {
+        "sí",
+        "si",
+        "yes",
+        "true",
+        "1",
+        "servidor",
+        "server",
+    }
+
+
 def is_empty_row(row: pd.Series) -> bool:
     return all(clean_text(value) is None for value in row.values)
 
@@ -93,18 +105,14 @@ def load_departments(db) -> dict[str, int]:
     return {row["nombre"].strip().casefold(): row["id"] for row in rows}
 
 
-def find_equipo(db, nombre_norm: str) -> dict | None:
-    row = db.execute(
-        text(
-            """
-            SELECT id, departamento_id
-            FROM equipos
-            WHERE nombre_norm = :nombre_norm
-            LIMIT 1
-            """
-        ),
-        {"nombre_norm": nombre_norm},
-    ).mappings().first()
+def find_equipo(db, nombre_norm: str, departamento_id: int | None = None) -> dict | None:
+    query = "SELECT id, departamento_id FROM equipos WHERE nombre_norm = :nombre_norm"
+    params: dict = {"nombre_norm": nombre_norm}
+    if departamento_id is not None:
+        query += " AND departamento_id = :departamento_id"
+        params["departamento_id"] = departamento_id
+    query += " LIMIT 1"
+    row = db.execute(text(query), params).mappings().first()
     return dict(row) if row else None
 
 
@@ -122,13 +130,20 @@ def build_payload(row: pd.Series, departamento_id: int) -> dict:
     }
     for csv_col, db_col in CSV_TO_DB.items():
         payload[db_col] = clean_text(row.get(csv_col))
+    payload["es_servidor"] = parse_bool_flag(
+        row.get("Es Servidor") or row.get("Servidor") or row.get("Tipo")
+    )
     responsable = payload.get("responsable")
     payload["notas"] = responsable
     return payload
 
 
 def upsert_equipo(db, payload: dict) -> str:
-    existing = find_equipo(db, payload["nombre_norm"])
+    existing = find_equipo(
+        db,
+        payload["nombre_norm"],
+        departamento_id=payload["departamento_id"],
+    )
     if existing:
         db.execute(
             text(
@@ -150,6 +165,7 @@ def upsert_equipo(db, payload: dict) -> str:
                     ubicacion = :ubicacion,
                     coste = :coste,
                     fecha_adquisicion = :fecha_adquisicion,
+                    es_servidor = :es_servidor,
                     fecha_baja = CASE WHEN :activo = TRUE THEN NULL ELSE fecha_baja END
                 WHERE id = :id
                 """
@@ -164,13 +180,13 @@ def upsert_equipo(db, payload: dict) -> str:
                 departamento_id, nombre, nombre_norm, activo, notas,
                 tipo_dispositivo, marca_modelo, num_serie, mac_address,
                 sistema_operativo, procesador, ram, almacenamiento,
-                responsable, ubicacion, coste, fecha_adquisicion
+                responsable, ubicacion, coste, fecha_adquisicion, es_servidor
             )
             VALUES (
                 :departamento_id, :nombre, :nombre_norm, :activo, :notas,
                 :tipo_dispositivo, :marca_modelo, :num_serie, :mac_address,
                 :sistema_operativo, :procesador, :ram, :almacenamiento,
-                :responsable, :ubicacion, :coste, :fecha_adquisicion
+                :responsable, :ubicacion, :coste, :fecha_adquisicion, :es_servidor
             )
             """
         ),
@@ -200,6 +216,8 @@ def import_csv(path: Path) -> dict[str, int]:
                 counters["incomplete"] += 1
                 continue
             payload = build_payload(row, departamento_id)
+            if departamento.strip().casefold() == "servidores":
+                payload["es_servidor"] = True
             result = upsert_equipo(db, payload)
             counters[result] += 1
     return counters

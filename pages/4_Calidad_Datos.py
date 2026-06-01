@@ -94,8 +94,19 @@ with tab_common:
             for row in common_not_authorized
         }
         selected_label = st.selectbox("Software a autorizar", list(labels.keys()))
-        if st.button("Autorizar software seleccionado"):
-            with get_engine().begin() as db:
-                inserted = autorizar_softwares(db, [labels[selected_label]], motivo)
-            st.success(f"Software autorizado añadido: {inserted}")
-            st.rerun()
+        confirm_key = f"confirm_autorizar_{labels[selected_label]}"
+        if not st.session_state.get(confirm_key):
+            if st.button("Autorizar software seleccionado"):
+                st.session_state[confirm_key] = True
+                st.rerun()
+        else:
+            st.warning(
+                f"¿Confirmas la autorización de **{selected_label}**? "
+                f"Esta acción no se puede deshacer fácilmente."
+            )
+            if st.button("Confirmar autorización", type="primary"):
+                with get_engine().begin() as db:
+                    inserted = autorizar_softwares(db, [labels[selected_label]], motivo)
+                st.session_state[confirm_key] = False
+                st.success(f"Software autorizado añadido: {inserted}")
+                st.rerun()

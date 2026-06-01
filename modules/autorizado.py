@@ -1,6 +1,91 @@
 from __future__ import annotations
 
+import re
+
 from sqlalchemy import text
+
+
+_VERSION_TOKEN_RE = re.compile(
+    r"""
+    (?:
+        v?\d+(?:\.\d+){1,5}[A-Za-z0-9.-]*
+        |
+        20\d{2}(?:\.\d+){1,4}
+    )
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+_PAREN_RE = re.compile(r"\(([^()]*)\)")
+
+
+def _clean_join(values: set[str], separator: str = ", ") -> str | None:
+    cleaned = sorted({str(value).strip() for value in values if str(value or "").strip()}, key=str.casefold)
+    return separator.join(cleaned) if cleaned else None
+
+
+def _normalizar_autorizado_nombre(nombre: str | None) -> tuple[str, str, list[str]]:
+    raw = str(nombre or "").strip()
+    if not raw:
+        return "", "", []
+
+    versiones: list[str] = []
+
+    def remove_parenthetical(match: re.Match) -> str:
+        content = match.group(1).strip()
+        if _VERSION_TOKEN_RE.fullmatch(content):
+            versiones.append(content)
+            return " "
+        return match.group(0)
+
+    base = _PAREN_RE.sub(remove_parenthetical, raw)
+
+    while True:
+        match = re.search(rf"(?:\s+|^)(?P<version>{_VERSION_TOKEN_RE.pattern})\s*$", base, re.IGNORECASE | re.VERBOSE)
+        if not match:
+            break
+        versiones.append(match.group("version").strip())
+        base = base[: match.start()].strip()
+
+    base = re.sub(r"\s+", " ", base).strip(" -_.,")
+    if not base:
+        base = raw
+    grupo = base.casefold()
+    return grupo, base, versiones
+
+
+def _listar_autorizado_rows(db) -> list[dict]:
+    rows = db.execute(
+        text(
+            """
+            SELECT
+                sa.*,
+                COALESCE(s.nombre, sa.nombre) AS nombre_visible,
+                COALESCE(s.fabricante, sa.fabricante) AS fabricante_visible,
+                COALESCE(sa.version, s.version_referencia) AS version_visible,
+                d.nombre AS departamento_nombre,
+                e.id AS equipo_activo_id,
+                e.nombre AS equipo_nombre
+            FROM software_autorizado sa
+            LEFT JOIN software s ON s.id = sa.software_id
+            LEFT JOIN departamentos d ON d.id = COALESCE(sa.departamento_id, s.departamento_id)
+            LEFT JOIN equipos e ON e.id = sa.equipo_id AND e.activo = TRUE
+            WHERE COALESCE(sa.activo, TRUE) = TRUE
+              AND (
+                  sa.software_id IS NULL
+                  OR (
+                      SELECT COUNT(DISTINCT swe_chk.equipo_id)
+                      FROM software_equipo swe_chk
+                      JOIN equipos e_chk ON e_chk.id = swe_chk.equipo_id
+                      WHERE swe_chk.software_id = sa.software_id
+                        AND swe_chk.presente = TRUE
+                        AND e_chk.activo = TRUE
+                  ) < 2
+              )
+            ORDER BY departamento_nombre, nombre_visible, version_visible
+            """
+        )
+    ).mappings().all()
+    return [dict(row) for row in rows]
 
 
 def listar_autorizado(db) -> list[dict]:
@@ -25,55 +110,196 @@ def listar_autorizado(db) -> list[dict]:
 
 
 def listar_autorizado_agrupado(db) -> list[dict]:
-    rows = db.execute(
+    grupos: dict[str, dict] = {}
+    for row in _listar_autorizado_rows(db):
+        grupo, nombre_base, versiones_nombre = _normalizar_autorizado_nombre(row.get("nombre_visible"))
+        if not grupo:
+            continue
+        item = grupos.setdefault(
+            grupo,
+            {
+                "grupo": grupo,
+                "nombres": set(),
+                "fabricantes_set": set(),
+                "versiones_set": set(),
+                "departamentos_set": set(),
+                "equipos_usuarios_set": set(),
+                "observaciones_set": set(),
+                "fecha_reciente": None,
+                "equipo_ids": set(),
+                "usuario_texto_ids": set(),
+                "registros": 0,
+            },
+        )
+        item["nombres"].add(nombre_base)
+        item["fabricantes_set"].add(row.get("fabricante_visible"))
+        item["versiones_set"].add(row.get("version_visible"))
+        item["versiones_set"].update(versiones_nombre)
+        item["departamentos_set"].add(row.get("departamento_nombre") or "Sin departamento")
+        equipo_usuario = row.get("equipo_nombre") or row.get("usuario_texto")
+        item["equipos_usuarios_set"].add(equipo_usuario)
+        item["observaciones_set"].add(row.get("observaciones"))
+        fecha = row.get("fecha_autorizacion") or row.get("fecha_alta")
+        if fecha and (item["fecha_reciente"] is None or fecha > item["fecha_reciente"]):
+            item["fecha_reciente"] = fecha
+        if row.get("equipo_activo_id") is not None:
+            item["equipo_ids"].add(row["equipo_activo_id"])
+        elif row.get("usuario_texto"):
+            item["usuario_texto_ids"].add(row["id"])
+        item["registros"] += 1
+
+    result = []
+    for item in grupos.values():
+        nombres = sorted(item["nombres"], key=lambda value: (len(value), value.casefold()))
+        n_dispositivos_vinculados = len(item["equipo_ids"])
+        n_usuarios_texto = len(item["usuario_texto_ids"])
+        result.append(
+            {
+                "grupo": item["grupo"],
+                "nombre": nombres[0] if nombres else item["grupo"],
+                "fabricantes": _clean_join(item["fabricantes_set"]),
+                "versiones": _clean_join(item["versiones_set"]),
+                "departamentos": _clean_join(item["departamentos_set"]),
+                "equipos_usuarios": _clean_join(item["equipos_usuarios_set"]),
+                "observaciones": _clean_join(item["observaciones_set"], " | "),
+                "fecha_reciente": item["fecha_reciente"],
+                "n_dispositivos_vinculados": n_dispositivos_vinculados,
+                "n_usuarios_texto": n_usuarios_texto,
+                "n_dispositivos": n_dispositivos_vinculados + n_usuarios_texto,
+                "registros": item["registros"],
+            }
+        )
+    return sorted(result, key=lambda row: str(row["nombre"]).casefold())
+
+
+def promover_multidevice_a_inventario(db) -> int:
+    """
+    Marca como inactivos los registros de software_autorizado cuyo software
+    vinculado ya esta instalado en 2 o mas dispositivos activos.
+
+    El software sigue apareciendo en el inventario del departamento; solo deja
+    de figurar como autorizacion individual.
+    """
+    result = db.execute(
         text(
             """
-            SELECT
-                LOWER(TRIM(COALESCE(s.nombre, sa.nombre))) AS grupo,
-                MIN(COALESCE(s.nombre, sa.nombre)) AS nombre,
-                GROUP_CONCAT(DISTINCT NULLIF(COALESCE(s.fabricante, sa.fabricante), '') ORDER BY COALESCE(s.fabricante, sa.fabricante) SEPARATOR ', ') AS fabricantes,
-                GROUP_CONCAT(DISTINCT NULLIF(COALESCE(sa.version, s.version_referencia), '') ORDER BY COALESCE(sa.version, s.version_referencia) SEPARATOR ', ') AS versiones,
-                GROUP_CONCAT(DISTINCT COALESCE(d.nombre, 'Sin departamento') ORDER BY d.nombre SEPARATOR ', ') AS departamentos,
-                GROUP_CONCAT(DISTINCT NULLIF(COALESCE(e.nombre, sa.usuario_texto), '') ORDER BY COALESCE(e.nombre, sa.usuario_texto) SEPARATOR ', ') AS equipos_usuarios,
-                GROUP_CONCAT(DISTINCT NULLIF(sa.observaciones, '') ORDER BY sa.observaciones SEPARATOR ' | ') AS observaciones,
-                MAX(COALESCE(sa.fecha_autorizacion, sa.fecha_alta)) AS fecha_reciente,
-                COUNT(*) AS registros
-            FROM software_autorizado sa
-            LEFT JOIN software s ON s.id = sa.software_id
-            LEFT JOIN departamentos d ON d.id = COALESCE(sa.departamento_id, s.departamento_id)
-            LEFT JOIN equipos e ON e.id = sa.equipo_id AND e.activo = TRUE
+            UPDATE software_autorizado sa
+            SET sa.activo = FALSE
             WHERE COALESCE(sa.activo, TRUE) = TRUE
-            GROUP BY LOWER(TRIM(COALESCE(s.nombre, sa.nombre)))
-            ORDER BY nombre
+              AND sa.software_id IS NOT NULL
+              AND (
+                  SELECT COUNT(DISTINCT swe_chk.equipo_id)
+                  FROM software_equipo swe_chk
+                  JOIN equipos e_chk ON e_chk.id = swe_chk.equipo_id
+                  WHERE swe_chk.software_id = sa.software_id
+                    AND swe_chk.presente = TRUE
+                    AND e_chk.activo = TRUE
+              ) >= 2
             """
         )
-    ).mappings().all()
-    return [dict(row) for row in rows]
+    )
+    return int(result.rowcount or 0)
+
+
+def promover_antiguos_a_inventario(db, dias: int = 90) -> int:
+    """
+    Marca como inactivos los registros de software_autorizado cuyo software
+    lleva mas de `dias` dias instalado en el dispositivo.
+
+    Usa fecha_instalacion si esta disponible; si no, fecha_ultima_deteccion.
+    El software sigue apareciendo en el inventario del departamento.
+    """
+    result = db.execute(
+        text(
+            """
+            UPDATE software_autorizado sa
+            SET sa.activo = FALSE
+            WHERE COALESCE(sa.activo, TRUE) = TRUE
+              AND sa.software_id IS NOT NULL
+              AND EXISTS (
+                  SELECT 1
+                  FROM software_equipo swe
+                  JOIN equipos e ON e.id = swe.equipo_id
+                  WHERE swe.software_id = sa.software_id
+                    AND swe.presente = TRUE
+                    AND e.activo = TRUE
+                    AND COALESCE(swe.fecha_instalacion, swe.fecha_ultima_deteccion)
+                        <= DATE_SUB(CURRENT_DATE, INTERVAL :dias DAY)
+              )
+            """
+        ),
+        {"dias": dias},
+    )
+    return int(result.rowcount or 0)
+
+
+def contar_pendientes_promocion(db, dias: int = 90) -> int:
+    """
+    Cuenta registros de software_autorizado que pasarian al inventario porque
+    estan en 2+ dispositivos o llevan mas de `dias` dias instalados.
+    """
+    result = db.execute(
+        text(
+            """
+            SELECT COUNT(*)
+            FROM software_autorizado sa
+            WHERE COALESCE(sa.activo, TRUE) = TRUE
+              AND sa.software_id IS NOT NULL
+              AND (
+                  (
+                      SELECT COUNT(DISTINCT swe_chk.equipo_id)
+                      FROM software_equipo swe_chk
+                      JOIN equipos e_chk ON e_chk.id = swe_chk.equipo_id
+                      WHERE swe_chk.software_id = sa.software_id
+                        AND swe_chk.presente = TRUE
+                        AND e_chk.activo = TRUE
+                  ) >= 2
+                  OR EXISTS (
+                      SELECT 1
+                      FROM software_equipo swe
+                      JOIN equipos e ON e.id = swe.equipo_id
+                      WHERE swe.software_id = sa.software_id
+                        AND swe.presente = TRUE
+                        AND e.activo = TRUE
+                        AND COALESCE(swe.fecha_instalacion, swe.fecha_ultima_deteccion)
+                            <= DATE_SUB(CURRENT_DATE, INTERVAL :dias DAY)
+                  )
+              )
+            """
+        ),
+        {"dias": dias},
+    ).scalar()
+    return int(result or 0)
+
+
+def promover_todos_los_pendientes(db, dias: int = 90) -> dict:
+    """
+    Ejecuta los dos tipos de promocion en una sola llamada.
+    Devuelve los conteos de cada motivo.
+    """
+    por_multidevice = promover_multidevice_a_inventario(db)
+    por_antiguedad = promover_antiguos_a_inventario(db, dias=dias)
+    return {
+        "por_multidevice": por_multidevice,
+        "por_antiguedad": por_antiguedad,
+        "total": por_multidevice + por_antiguedad,
+    }
 
 
 def listar_autorizado_detalle_grupo(db, grupo: str) -> list[dict]:
-    rows = db.execute(
-        text(
-            """
-            SELECT
-                sa.*,
-                COALESCE(s.nombre, sa.nombre) AS nombre_visible,
-                COALESCE(s.fabricante, sa.fabricante) AS fabricante_visible,
-                COALESCE(sa.version, s.version_referencia) AS version_visible,
-                d.nombre AS departamento_nombre,
-                e.nombre AS equipo_nombre
-            FROM software_autorizado sa
-            LEFT JOIN software s ON s.id = sa.software_id
-            LEFT JOIN departamentos d ON d.id = COALESCE(sa.departamento_id, s.departamento_id)
-            LEFT JOIN equipos e ON e.id = sa.equipo_id AND e.activo = TRUE
-            WHERE COALESCE(sa.activo, TRUE) = TRUE
-              AND LOWER(TRIM(COALESCE(s.nombre, sa.nombre))) = :grupo
-            ORDER BY departamento_nombre, nombre_visible, version_visible
-            """
+    rows = [
+        row
+        for row in _listar_autorizado_rows(db)
+        if _normalizar_autorizado_nombre(row.get("nombre_visible"))[0] == grupo
+    ]
+    return sorted(
+        rows,
+        key=lambda row: (
+            str(row.get("departamento_nombre") or "").casefold(),
+            str(row.get("nombre_visible") or "").casefold(),
+            str(row.get("version_visible") or "").casefold(),
         ),
-        {"grupo": grupo},
-    ).mappings().all()
-    return [dict(row) for row in rows]
+    )
 
 
 def crear_autorizado(db, values: dict) -> int:
@@ -125,17 +351,24 @@ def actualizar_autorizado(db, autorizado_id: int, values: dict) -> None:
 
 
 def eliminar_autorizado_grupo(db, grupo: str) -> int:
+    ids = [
+        row["id"]
+        for row in _listar_autorizado_rows(db)
+        if _normalizar_autorizado_nombre(row.get("nombre_visible"))[0] == grupo
+    ]
+    if not ids:
+        return 0
+    params = {f"id_{idx}": autorizado_id for idx, autorizado_id in enumerate(ids)}
+    placeholders = ", ".join(f":{key}" for key in params)
     result = db.execute(
         text(
-            """
-            UPDATE software_autorizado sa
-            LEFT JOIN software s ON s.id = sa.software_id
-            SET sa.activo = FALSE
-            WHERE COALESCE(sa.activo, TRUE) = TRUE
-              AND LOWER(TRIM(COALESCE(s.nombre, sa.nombre))) = :grupo
+            f"""
+            UPDATE software_autorizado
+            SET activo = FALSE
+            WHERE id IN ({placeholders})
             """
         ),
-        {"grupo": grupo},
+        params,
     )
     return int(result.rowcount or 0)
 
