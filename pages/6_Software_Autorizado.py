@@ -16,9 +16,14 @@ from modules.autorizado import (
 )
 from modules.equipos import listar_equipos
 from modules.software import listar_departamentos
+from utils.theme import apply_theme, sidebar_logo
+from utils.ui_components import empty_state, page_header
 
 
-st.title("Software Autorizado")
+apply_theme()
+sidebar_logo()
+
+page_header("Software autorizado", "Programas autorizados por departamento")
 
 try:
     with get_engine().connect() as db:
@@ -51,7 +56,7 @@ if pendientes_promocion > 0:
 
 df = pd.DataFrame(grouped_rows)
 if df.empty:
-    st.info("No hay software autorizado registrado.")
+    empty_state("Sin software autorizado", "No hay software autorizado registrado.", "ti ti-shield-off")
 else:
     display = df.rename(
         columns={

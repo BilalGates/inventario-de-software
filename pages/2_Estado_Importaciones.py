@@ -6,9 +6,14 @@ import streamlit as st
 from database.connection import get_engine
 from modules.equipos import listar_estado_importaciones
 from modules.software import listar_departamentos
+from utils.theme import apply_theme, sidebar_logo
+from utils.ui_components import empty_state, page_header
 
 
-st.title("Estado de importaciones")
+apply_theme()
+sidebar_logo()
+
+page_header("Estado de importaciones", "Monitoreo de importaciones por equipo")
 
 try:
     with get_engine().connect() as db:
@@ -64,6 +69,6 @@ display = pd.DataFrame(
 )
 
 if display.empty:
-    st.info("No hay equipos que coincidan con los filtros.")
+    empty_state("Sin resultados", "No hay equipos que coincidan con los filtros.", "ti ti-device-laptop-off")
 else:
     st.dataframe(display, hide_index=True, use_container_width=True)

@@ -9,15 +9,42 @@ from database.connection import get_engine
 from modules.equipos import estado_importacion, listar_estado_importaciones
 from modules.exportacion import generar_excel_completo
 from modules.software import dashboard_metricas, estado_departamentos
+from utils.theme import apply_theme, sidebar_logo
+from utils.ui_components import empty_state, kpi_card, page_header, status_badge
 
 
-st.set_page_config(page_title="Inventario Software Asserta", layout="wide")
+st.set_page_config(
+    page_title="Inventario Software — Asserta",
+    layout="wide",
+    initial_sidebar_state="expanded",
+    page_icon="https://asserta.net/wp-content/themes/asserta/img/favicon.png",
+)
+
+apply_theme()
+sidebar_logo()
+
+# ── Promoción automática al iniciar sesión ──────────────────────
+if not st.session_state.get("_promocion_ejecutada"):
+    try:
+        with get_engine().begin() as _db:
+            from modules.autorizado import promover_todos_los_pendientes
+            _result = promover_todos_los_pendientes(_db)
+            if _result["total"]:
+                st.toast(
+                    f"{_result['total']} programa(s) movidos al inventario del departamento.",
+                    icon="ℹ️",
+                )
+    except Exception:
+        pass
+    finally:
+        st.session_state["_promocion_ejecutada"] = True
+
 st.session_state.setdefault("departamento_id", None)
 st.session_state.setdefault("departamento_nombre", None)
 
 
 def dashboard() -> None:
-    st.title("Inventario Software Asserta")
+    page_header("Dashboard", "Visión general del inventario de software")
 
     try:
         with get_engine().connect() as db:
@@ -29,112 +56,136 @@ def dashboard() -> None:
         st.exception(exc)
         st.stop()
 
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Equipos activos", metricas["equipos_activos"])
-    col2.metric("Software activo", metricas["software_activo"])
-    col3.metric("Importaciones este mes", metricas["importaciones_mes"])
-    if metricas["autorizado_pendiente_promocion"] > 0:
-        col4.metric(
-            "Autorizados a revisar",
-            metricas["autorizado_pendiente_promocion"],
-            delta="Mover a inventario",
-            delta_color="inverse",
+    # ── KPI Cards ────────────────────────────────────────────────
+    c1, c2, c3, c4 = st.columns(4, gap="medium")
+    with c1:
+        kpi_card(
+            "Equipos activos",
+            metricas["equipos_activos"],
+            icon="ti ti-device-laptop",
+            color="purple",
         )
-    else:
-        col4.metric(
-            "Software sin dispositivo",
+    with c2:
+        kpi_card(
+            "Software activo",
+            metricas["software_activo"],
+            icon="ti ti-apps",
+            color="blue",
+        )
+    with c3:
+        kpi_card(
+            "Importaciones este mes",
+            metricas["importaciones_mes"],
+            icon="ti ti-refresh",
+            color="amber",
+        )
+    with c4:
+        kpi_card(
+            "Sin dispositivo",
             metricas["software_sin_dispositivo"],
-            delta="Revisar" if metricas["software_sin_dispositivo"] else None,
-            delta_color="inverse",
+            icon="ti ti-alert-circle",
+            color="red" if metricas["software_sin_dispositivo"] else "green",
+            delta="Revisar" if metricas["software_sin_dispositivo"] else "Todo ok",
+            delta_color="#EF4444" if metricas["software_sin_dispositivo"] else "#10B981",
         )
 
-    st.subheader("Estado por departamento")
-    dept_rows = []
-    for dept in departamentos:
-        dept_rows.append(
+    st.markdown("<div style='margin-top:24px;'></div>", unsafe_allow_html=True)
+
+    # ── Estado por departamento + Importaciones recientes ────────
+    col_dept, col_imports = st.columns([1, 1], gap="medium")
+
+    with col_dept:
+        st.markdown(
+            "<h3 style='margin-bottom:12px;'>Estado por departamento</h3>",
+            unsafe_allow_html=True,
+        )
+        if departamentos:
+            dept_rows = []
+            for dept in departamentos:
+                badge_text = estado_importacion(dept["ultima_importacion"])
+                variant = (
+                    "success" if "🟢" in badge_text
+                    else "warning" if "🟡" in badge_text
+                    else "danger"
+                )
+                clean_status = badge_text.replace("🟢 ", "").replace("🟡 ", "").replace("🔴 ", "")
+                dept_rows.append({
+                    "Departamento": dept["departamento"],
+                    "Equipos": dept["equipos_activos"],
+                    "Software": dept["software_visible"],
+                    "Última importación": str(dept["ultima_importacion"] or "—"),
+                    "Estado": clean_status,
+                })
+            st.dataframe(
+                pd.DataFrame(dept_rows),
+                hide_index=True,
+                use_container_width=True,
+                height=240,
+            )
+        else:
+            empty_state("Sin departamentos", "No hay departamentos configurados.", "ti ti-building-off")
+
+    with col_imports:
+        st.markdown(
+            "<h3 style='margin-bottom:12px;'>Alertas de importación</h3>",
+            unsafe_allow_html=True,
+        )
+        alertas = [
             {
-                "Departamento": dept["departamento"],
-                "Equipos activos": dept["equipos_activos"],
-                "Software visible": dept["software_visible"],
-                "Última importación": dept["ultima_importacion"],
-                "Estado": estado_importacion(dept["ultima_importacion"]),
+                "Equipo": row["nombre"],
+                "Departamento": row["departamento_nombre"],
+                "Última importación": str(row["ultima_importacion"] or "—"),
+                "Días": row["dias_desde_importacion"] or "—",
+                "Responsable": row.get("responsable") or "—",
             }
-        )
-    st.dataframe(pd.DataFrame(dept_rows), hide_index=True, use_container_width=True)
+            for row in equipos_estado
+            if row["dias_desde_importacion"] is None
+            or row["dias_desde_importacion"] > 30
+            or not row.get("responsable")
+        ]
+        if alertas:
+            st.dataframe(
+                pd.DataFrame(alertas[:50]),
+                hide_index=True,
+                use_container_width=True,
+                height=240,
+            )
+        else:
+            empty_state("Sin alertas", "Todas las importaciones están al día.", "ti ti-circle-check")
 
-    st.subheader("Alertas activas")
-    alertas = [
-        {
-            "Equipo": row["nombre"],
-            "Departamento": row["departamento_nombre"],
-            "Última importación": row["ultima_importacion"],
-            "Estado": row["estado_importacion"],
-            "Responsable": row.get("responsable") or "",
-        }
-        for row in equipos_estado
-        if row["dias_desde_importacion"] is None
-        or row["dias_desde_importacion"] > 30
-        or not row.get("responsable")
-    ]
+    st.markdown("<div style='margin-top:16px;'></div>", unsafe_allow_html=True)
 
-    if alertas:
-        st.dataframe(pd.DataFrame(alertas[:50]), hide_index=True, use_container_width=True)
-        if len(alertas) > 50:
-            st.caption(f"Mostrando 50 de {len(alertas)} alertas.")
-    else:
-        st.success("No hay alertas activas.")
-
-    st.divider()
+    # ── Exportar todo ────────────────────────────────────────────
     with get_engine().connect() as db:
         excel_completo = generar_excel_completo(db)
     st.download_button(
-        "Exportar todo",
+        "Exportar inventario completo",
         data=excel_completo,
-        file_name=f"Inventario_Asserta_Completo_{date.today().isoformat()}.xlsx",
+        file_name=f"Inventario_Asserta_{date.today().isoformat()}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
-
-
-# Promocion automatica al iniciar sesion (una vez por sesion)
-if not st.session_state.get("_promocion_ejecutada"):
-    try:
-        with get_engine().begin() as _db:
-            from modules.autorizado import promover_todos_los_pendientes
-
-            _result = promover_todos_los_pendientes(_db)
-            if _result["total"]:
-                st.toast(
-                    f"{_result['total']} programa(s) movidos al inventario del departamento "
-                    f"({_result['por_antiguedad']} por antiguedad, "
-                    f"{_result['por_multidevice']} por multiples dispositivos).",
-                    icon="ℹ️",
-                )
-    except Exception:
-        pass
-    finally:
-        st.session_state["_promocion_ejecutada"] = True
 
 
 navigation = st.navigation(
     {
         "Inicio": [
-            st.Page(dashboard, title="Dashboard", url_path="dashboard"),
+            st.Page(dashboard, title="Dashboard", url_path="dashboard", icon=":material/dashboard:"),
         ],
         "Inventario de software": [
-            st.Page("pages/1_Inventario_de_software.py", title="Resumen"),
-            st.Page("pages/10_Direccion.py", title="Dirección"),
-            st.Page("pages/11_IT.py", title="IT"),
-            st.Page("pages/12_Silicon.py", title="Silicon"),
-            st.Page("pages/13_Data_Science.py", title="Data Science"),
-            st.Page("pages/14_Administracion.py", title="Administración"),
-            st.Page("pages/15_Servidores.py", title="Servidores"),
+            st.Page("pages/1_Inventario_de_software.py", title="Resumen", icon=":material/apps:"),
+            st.Page("pages/10_Direccion.py", title="Dirección", icon=":material/corporate_fare:"),
+            st.Page("pages/11_IT.py", title="IT", icon=":material/terminal:"),
+            st.Page("pages/12_Silicon.py", title="Silicon", icon=":material/memory:"),
+            st.Page("pages/13_Data_Science.py", title="Data Science", icon=":material/analytics:"),
+            st.Page("pages/14_Administracion.py", title="Administración", icon=":material/admin_panel_settings:"),
+            st.Page("pages/15_Servidores.py", title="Servidores", icon=":material/dns:"),
         ],
         "Gestión": [
-            st.Page("pages/2_Estado_Importaciones.py", title="Estado Importaciones"),
-            st.Page("pages/3_Software_Empresa.py", title="Software Empresa"),
-            st.Page("pages/4_Calidad_Datos.py", title="Calidad Datos"),
-            st.Page("pages/5_Equipos.py", title="Equipos"),
-            st.Page("pages/6_Software_Autorizado.py", title="Software Autorizado"),
+            st.Page("pages/2_Estado_Importaciones.py", title="Importaciones", icon=":material/sync:"),
+            st.Page("pages/3_Software_Empresa.py", title="Software empresa", icon=":material/business:"),
+            st.Page("pages/4_Calidad_Datos.py", title="Calidad de datos", icon=":material/verified:"),
+            st.Page("pages/5_Equipos.py", title="Equipos", icon=":material/devices:"),
+            st.Page("pages/6_Software_Autorizado.py", title="Autorizado", icon=":material/shield:"),
         ],
     }
 )

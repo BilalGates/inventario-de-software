@@ -8,6 +8,8 @@ from sqlalchemy import text
 _VERSION_TOKEN_RE = re.compile(
     r"""
     (?:
+        \d{4,6}(?:\.\d+){1,5}[A-Za-z0-9.-]*
+        |
         v?\d+(?:\.\d+){1,5}[A-Za-z0-9.-]*
         |
         20\d{2}(?:\.\d+){1,4}
@@ -16,6 +18,45 @@ _VERSION_TOKEN_RE = re.compile(
     re.IGNORECASE | re.VERBOSE,
 )
 _PAREN_RE = re.compile(r"\(([^()]*)\)")
+_ARCH_SUFFIX_RE = re.compile(r"\s*(?P<arch>\((?:x86|x64|arm64|32-bit|64-bit)\))\s*$", re.IGNORECASE)
+_TRAILING_VERSION_PATTERNS = [
+    re.compile(
+        r"""
+        (?P<prefix>.*?)
+        (?:\s*[-_:]\s*|\s+)
+        (?P<version>v?\d{4,6}(?:\.\d+){1,5}[A-Za-z0-9.-]*|v?\d+(?:\.\d+){1,5}[A-Za-z0-9.-]*)
+        \s*$
+        """,
+        re.IGNORECASE | re.VERBOSE,
+    ),
+    re.compile(
+        r"""
+        (?P<prefix>.*?)
+        \s+
+        (?P<version>V\d+(?:\.\d+){0,5}[A-Za-z0-9.-]*)
+        \s*$
+        """,
+        re.IGNORECASE | re.VERBOSE,
+    ),
+    re.compile(
+        r"""
+        (?P<prefix>.*?)
+        \s+
+        (?P<version>(?:Update|Build|Version|Release)\s+\d+[A-Za-z0-9.-]*)
+        \s*$
+        """,
+        re.IGNORECASE | re.VERBOSE,
+    ),
+    re.compile(
+        r"""
+        (?P<prefix>.*?)
+        \s+
+        (?P<version>(?:19|20)\d{2}(?:[-.]\d+)?)
+        \s*$
+        """,
+        re.IGNORECASE | re.VERBOSE,
+    ),
+]
 
 
 def _clean_join(values: set[str], separator: str = ", ") -> str | None:
@@ -38,15 +79,32 @@ def _normalizar_autorizado_nombre(nombre: str | None) -> tuple[str, str, list[st
         return match.group(0)
 
     base = _PAREN_RE.sub(remove_parenthetical, raw)
+    arch_suffix = ""
+    arch_match = _ARCH_SUFFIX_RE.search(base)
+    if arch_match:
+        arch_suffix = f" {arch_match.group('arch')}"
+        base = base[: arch_match.start()].strip()
 
     while True:
-        match = re.search(rf"(?:\s+|^)(?P<version>{_VERSION_TOKEN_RE.pattern})\s*$", base, re.IGNORECASE | re.VERBOSE)
-        if not match:
+        matched = False
+        for pattern in _TRAILING_VERSION_PATTERNS:
+            match = pattern.match(base)
+            if not match:
+                continue
+            prefix = match.group("prefix").strip(" -_.,")
+            version = match.group("version").strip()
+            if not prefix:
+                continue
+            versiones.append(version)
+            base = prefix
+            matched = True
             break
-        versiones.append(match.group("version").strip())
-        base = base[: match.start()].strip()
+        if not matched:
+            break
 
     base = re.sub(r"\s+", " ", base).strip(" -_.,")
+    if arch_suffix and base:
+        base = f"{base}{arch_suffix}"
     if not base:
         base = raw
     grupo = base.casefold()

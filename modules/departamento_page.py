@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from datetime import date
 
@@ -42,6 +42,7 @@ from modules.software import (
     ocultar_software_sin_dispositivos,
 )
 from utils.parser import parse_file, parse_paste
+from utils.ui_components import empty_state, page_header
 
 
 st.session_state.setdefault("departamento_id", None)
@@ -92,7 +93,7 @@ def _render_import_audit(equipo_id: int) -> None:
         latest = ultima_importacion_por_equipo(db, equipo_id)
         recent = ultimas_importaciones_por_equipo(db, equipo_id, limit=5)
     if not latest:
-        st.info("Sin importaciones registradas para este dispositivo.")
+        empty_state("Sin importaciones", "No hay importaciones registradas para este dispositivo.", "ti ti-database-off")
         return
     cols = st.columns(6)
     cols[0].metric("Ãšltima importaciÃ³n", str(latest["fecha_importacion"]))
@@ -235,7 +236,7 @@ def render_inventario(dept: dict) -> None:
             texto_libre=texto or None,
         )
     if not inventario:
-        st.info("No hay software que coincida con los filtros.")
+        empty_state("Sin software", "No hay software que coincida con los filtros.", "ti ti-apps-off")
         return
     rows_by_id = {row["id"]: row for row in inventario}
     display_rows = []
@@ -469,7 +470,7 @@ def render_dispositivos(dept: dict, es_servidor: bool = False) -> None:
     with get_engine().connect() as db:
         equipos = listar_equipos(db, dept["id"], es_servidor=es_servidor)
     if not equipos:
-        st.info("No hay dispositivos registrados.")
+        empty_state("Sin dispositivos", "No hay dispositivos registrados.", "ti ti-device-laptop-off")
         return
     display = pd.DataFrame(equipos).rename(
         columns={
@@ -556,7 +557,7 @@ def render_reactivaciones(dept: dict) -> None:
     with get_engine().connect() as db:
         rows = listar_reactivaciones_pendientes(db, dept["id"])
     if not rows:
-        st.info("No hay reactivaciones pendientes.")
+        empty_state("Sin reactivaciones", "No hay reactivaciones pendientes.", "ti ti-circle-check")
         return
     st.dataframe(
         pd.DataFrame(rows)[["software_nombre", "version_referencia", "fabricante", "equipo", "fecha_deteccion"]],
@@ -581,7 +582,7 @@ def render_reactivaciones(dept: dict) -> None:
             st.rerun()
 
 
-st.title("Inventario por departamento")
+page_header("Inventario por departamento")
 
 def render_departamento_page(departamento_codigo: str) -> None:
     try:
@@ -599,10 +600,9 @@ def render_departamento_page(departamento_codigo: str) -> None:
 
     st.session_state["departamento_id"] = dept["id"]
     st.session_state["departamento_nombre"] = dept["nombre"]
-    st.title(dept["nombre"])
+    page_header(dept["nombre"], f"{dept['n_equipos']} dispositivos · {dept['n_software']} software")
     st.page_link("pages/1_Inventario_de_software.py", label="Volver al índice de departamentos")
     st.page_link("pages/3_Software_Empresa.py", label="Ver todo el software de la empresa")
-    st.subheader(f"{dept['n_equipos']} dispositivos · {dept['n_software']} software")
 
     tab_inv, tab_import, tab_export, tab_devices, tab_reactivate = st.tabs(
         ["Inventario", "Importar", "Exportar", "Dispositivos", "Reactivaciones"]

@@ -6,9 +6,14 @@ import streamlit as st
 from database.connection import get_engine
 from modules.equipos import listar_equipos
 from modules.software import listar_departamentos, listar_inventario_empresa
+from utils.theme import apply_theme, sidebar_logo
+from utils.ui_components import empty_state, page_header
 
 
-st.title("Software de la empresa")
+apply_theme()
+sidebar_logo()
+
+page_header("Software de la empresa", "Visión global de todo el software registrado")
 
 
 def _paginate(df: pd.DataFrame, key: str, page_size: int = 25) -> pd.DataFrame:
@@ -66,7 +71,7 @@ with get_engine().connect() as db:
 
 df = pd.DataFrame(rows)
 if df.empty:
-    st.info("No hay software que coincida con los filtros.")
+    empty_state("Sin software", "No hay software que coincida con los filtros.", "ti ti-apps-off")
 else:
     display = df[
         [

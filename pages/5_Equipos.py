@@ -20,10 +20,14 @@ from modules.equipos import (
 from modules.importacion import ultima_importacion_por_equipos, ultimas_importaciones_por_equipo
 from modules.software import listar_departamentos
 from utils.parser import parse_equipos_file, parse_equipos_paste
+from utils.theme import apply_theme, sidebar_logo
+from utils.ui_components import empty_state, page_header
 
 
-st.title("Equipos")
-st.caption("Vista global de todos los dispositivos de la empresa.")
+apply_theme()
+sidebar_logo()
+
+page_header("Equipos", "Gestión global de todos los dispositivos de la empresa.")
 
 try:
     with get_engine().connect() as db:
@@ -108,7 +112,7 @@ if filtered:
         use_container_width=True,
     )
 else:
-    st.info("No hay equipos que coincidan con los filtros.")
+    empty_state("Sin equipos", "No hay dispositivos que coincidan con los filtros.", "ti ti-device-laptop-off")
 
 if filtered:
     export_name = f"Inventario_Equipos_Empresa_{date.today().isoformat()}.xlsx"
@@ -242,7 +246,7 @@ if filtered:
                 use_container_width=True,
             )
         else:
-            st.info("Sin importaciones registradas para este dispositivo.")
+            empty_state("Sin importaciones", "No hay importaciones registradas para este dispositivo.", "ti ti-database-off")
 
     with st.form("edit_equipo_global"):
         usuario = st.text_input("Usuario del dispositivo", value=selected.get("notas") or "")

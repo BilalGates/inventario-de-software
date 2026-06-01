@@ -11,9 +11,14 @@ from modules.software import (
     software_comun_no_autorizado,
     versiones_sospechosas,
 )
+from utils.theme import apply_theme, sidebar_logo
+from utils.ui_components import page_header
 
 
-st.title("Calidad de datos")
+apply_theme()
+sidebar_logo()
+
+page_header("Calidad de datos", "Versiones sospechosas, fabricantes vacíos y autorización")
 
 try:
     with get_engine().connect() as db:

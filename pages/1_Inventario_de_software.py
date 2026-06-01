@@ -5,10 +5,14 @@ import streamlit as st
 
 from database.connection import get_engine
 from modules.software import listar_departamentos_con_estadisticas
+from utils.theme import apply_theme, sidebar_logo
+from utils.ui_components import empty_state, page_header
 
 
-st.title("Inventario de software")
-st.caption("Selecciona un departamento para abrir su inventario dedicado.")
+apply_theme()
+sidebar_logo()
+
+page_header("Inventario de software", "Selecciona un departamento para abrir su inventario dedicado.")
 
 DEPARTMENT_PAGES = {
     "gerencia": "pages/10_Direccion.py",
@@ -28,7 +32,7 @@ except Exception as exc:
     st.stop()
 
 if not departamentos:
-    st.info("No hay departamentos registrados.")
+    empty_state("Sin departamentos", "No hay departamentos registrados.", "ti ti-building-off")
     st.stop()
 
 cols = st.columns(3)

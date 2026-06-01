@@ -18,7 +18,12 @@ from modules.equipos import (
 )
 from modules.software import listar_departamentos
 from utils.parser import parse_equipos_file, parse_equipos_paste
+from utils.theme import apply_theme, sidebar_logo
+from utils.ui_components import empty_state
 
+
+apply_theme()
+sidebar_logo()
 
 render_departamento_page("servidores")
 
@@ -30,7 +35,7 @@ with get_engine().connect() as db:
     departamentos = listar_departamentos(db)
 
 if not servidores:
-    st.info("No hay servidores registrados.")
+    empty_state("Sin servidores", "No hay servidores registrados.", "ti ti-server-off")
 else:
     display = pd.DataFrame(servidores).rename(
         columns={
@@ -119,7 +124,7 @@ with st.expander("Importar servidores desde datos"):
 
 with st.expander("Ficha del servidor"):
     if not servidores:
-        st.info("No hay servidores para mostrar.")
+        empty_state("Sin servidores", "No hay servidores para mostrar.", "ti ti-server-off")
     else:
         labels = {f"{s['nombre']} (id {s['id']})": s for s in servidores}
         selected_label = st.selectbox("Servidor", list(labels.keys()), key="serv_select")

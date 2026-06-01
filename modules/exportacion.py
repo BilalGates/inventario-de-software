@@ -199,9 +199,14 @@ def generar_excel_completo(db) -> bytes:
         "Última actualización", "Clasificación", "Guía 105", "Observaciones",
     ]
 
+    sheet_names = {
+        "Data Science / Analytics": "Data Science",
+        "Servidores": "Hosts",
+    }
+
     for dept in departamentos:
         inventario = listar_inventario(db, dept["id"])
-        ws = wb.create_sheet(_safe_sheet_name(dept["nombre"]))
+        ws = wb.create_sheet(_safe_sheet_name(sheet_names.get(dept["nombre"], dept["nombre"])))
         rows = [
             [_cell_value(item.get(key)) for key, _ in EXPORT_COLUMNS]
             for item in inventario
@@ -212,7 +217,6 @@ def generar_excel_completo(db) -> bytes:
         ("id", "ID"),
         ("departamento_nombre", "Departamento"),
         ("nombre", "Dispositivo"),
-        ("es_servidor", "¿Servidor?"),
         ("notas", "Usuario"),
         ("tipo_dispositivo", "Tipo dispositivo"),
         ("marca_modelo", "Marca / Modelo"),
@@ -231,7 +235,7 @@ def generar_excel_completo(db) -> bytes:
     ]
     all_devices = listar_equipos(db, es_servidor=False)
     if all_devices:
-        ws_devices = wb.create_sheet("Dispositivos")
+        ws_devices = wb.create_sheet("Equipos")
         _write_rows(
             ws_devices,
             [label for _, label in device_columns_gral],
