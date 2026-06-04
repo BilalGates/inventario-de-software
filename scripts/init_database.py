@@ -95,22 +95,28 @@ def _rewrite_database_name(sql: str) -> str:
     return sql
 
 
-def _execute_sql_file(cursor, path: Path) -> None:
+def _execute_sql_file(cursor, path: Path, ignore_errors: bool = False) -> None:
     if not path.exists():
         raise DatabaseInitError(f"No se encontró el archivo SQL: {path}")
     sql = _rewrite_database_name(path.read_text(encoding="utf-8"))
     for statement in _split_sql(sql):
-        cursor.execute(statement)
+        try:
+            cursor.execute(statement)
+        except Exception as exc:
+            if ignore_errors:
+                print(f"[init_db] Warning en {path.name}: {exc}", flush=True)
+            else:
+                raise
 
 
 def initialize_database() -> None:
     with _connect() as connection:
         with connection.cursor() as cursor:
             _execute_sql_file(cursor, resource_path("database", "schema.sql"))
-            _execute_sql_file(cursor, resource_path("database", "seed.sql"))
+            _execute_sql_file(cursor, resource_path("database", "seed.sql"), ignore_errors=True)
             migrations_dir = resource_path("migrations")
             for migration in sorted(migrations_dir.glob("*.sql")):
-                _execute_sql_file(cursor, migration)
+                _execute_sql_file(cursor, migration, ignore_errors=True)
 
 
 _ALLOWED_TABLES = frozenset({"software", "equipos", "departamentos", "importaciones", "software_autorizado"})
