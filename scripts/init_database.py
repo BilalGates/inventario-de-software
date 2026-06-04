@@ -1,3 +1,7 @@
+"""
+Inicialización de la base de datos local.
+Aplica schema.sql, seed.sql y todas las migraciones en migrations/*.sql.
+"""
 from __future__ import annotations
 
 import argparse
@@ -11,8 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app_paths import resource_path
-from config import DB_CONFIG
+from config import DB_CONFIG, resource_path
 
 
 class DatabaseInitError(RuntimeError):
@@ -32,7 +35,7 @@ def _connect(database: str | None = None):
         )
     except pymysql.MySQLError as exc:
         raise DatabaseInitError(
-            "No se pudo conectar con MySQL local. Revisa que el servicio este arrancado "
+            "No se pudo conectar con MySQL. Revisa que el servicio esté arrancado "
             "y que las credenciales del archivo .env sean correctas."
         ) from exc
 
@@ -94,7 +97,7 @@ def _rewrite_database_name(sql: str) -> str:
 
 def _execute_sql_file(cursor, path: Path) -> None:
     if not path.exists():
-        raise DatabaseInitError(f"No se encontro el archivo SQL: {path}")
+        raise DatabaseInitError(f"No se encontró el archivo SQL: {path}")
     sql = _rewrite_database_name(path.read_text(encoding="utf-8"))
     for statement in _split_sql(sql):
         cursor.execute(statement)
@@ -126,22 +129,22 @@ def import_historical_data(force: bool = False) -> dict[str, object]:
     if not force and (_table_count("software") > 0 or _table_count("equipos") > 0):
         return {"skipped": True, "reason": "La base ya contiene datos."}
 
-    from migration.migrate_excel import migrate
+    from scripts.migrate_excel import migrate
     from scripts.importar_equipos_csv import import_csv
 
-    excel_path = resource_path("Inventario_Software_ENS_Por_Departamento.xlsx")
-    csv_path = resource_path("Inventario Equipos Informaticos Asserta(Equipos Asserta).csv")
-
     result: dict[str, object] = {"skipped": False}
+
+    excel_path = resource_path("resources", "Inventario_Software_ENS_Por_Departamento.xlsx")
     if excel_path.exists():
         result["software"] = migrate(excel_path)
     else:
-        result["software"] = f"No se encontro {excel_path.name}"
+        result["software"] = f"No se encontró {excel_path.name}"
 
+    csv_path = resource_path("resources", "Inventario_Equipos_Asserta.csv")
     if csv_path.exists():
         result["equipos"] = import_csv(csv_path)
     else:
-        result["equipos"] = f"No se encontro {csv_path.name}"
+        result["equipos"] = f"No se encontró {csv_path.name}"
 
     return result
 
@@ -156,8 +159,8 @@ def setup_local_database(import_historical: bool = False, force_import: bool = F
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Inicializa la base local de Inventario Software Asserta.")
-    parser.add_argument("--import-historical", action="store_true", help="Importa Excel/CSV historicos si la base esta vacia.")
-    parser.add_argument("--force-import", action="store_true", help="Fuerza la importacion aunque ya haya datos.")
+    parser.add_argument("--import-historical", action="store_true")
+    parser.add_argument("--force-import", action="store_true")
     args = parser.parse_args()
 
     try:

@@ -1,19 +1,56 @@
-.env
-*.env.*
-logs/
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
 *.pyo
 *.pyd
 *.so
 *.dll
+.pytest_cache/
+.coverage
+.cache
+*.egg-info/
+.eggs/
+
+# Entornos virtuales
+venv/
+env/
+ENV/
+.venv/
+
+# Variables de entorno (NO commitear credenciales)
+.env
+.env.local
+*.env.*
+
+# Build y distribución (NUNCA commitear binarios compilados)
 build/
 dist/
 dist_fixed/
 *.spec
-*.egg-info/
-.eggs/
-.venv/
-venv/
+*.exe
+__pyinstaller*/
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Logs
 *.log
-migrate_warnings.log
+logs/
+
+# Base de datos local
+*.db
+*.sqlite3
+
+# NiceGUI / Streamlit (eliminados — por si acaso)
+.nicegui/
+.streamlit/
+
+# Archivos temporales
+*.tmp
+*.bak
+~$*
