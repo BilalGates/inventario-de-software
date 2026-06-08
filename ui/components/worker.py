@@ -1,57 +1,113 @@
 """
-Worker/QThread para ejecutar operaciones de BD sin bloquear la UI.
+Worker para ejecutar operaciones de BD sin bloquear la UI.
+
+ESTRATEGIA: threading.Thread (stdlib) + QApplication.postEvent para entregar
+callbacks en el hilo principal.
+
+QApplication.postEvent es explícitamente thread-safe en Qt y es el mecanismo
+correcto para cruzar desde un hilo secundario (sin event loop Qt) al hilo principal.
 
 Uso:
-    self._thread = QThread()
-    self._worker = Worker(fetch_fn, arg1, arg2)
-    self._worker.moveToThread(self._thread)
-    self._thread.started.connect(self._worker.run)
-    self._worker.finished.connect(self._on_data_loaded)
-    self._worker.error.connect(self._on_error)
-    self._worker.finished.connect(self._thread.quit)
-    self._worker.finished.connect(self._worker.deleteLater)
-    self._thread.finished.connect(self._thread.deleteLater)
-    self._thread.start()
+    self._thread = run_in_thread(
+        self,               # parent (QObject/QWidget)
+        fetch_fn,           # función que corre en el hilo secundario
+        arg1, arg2,         # args posicionales para fetch_fn
+        on_done=self._on_data_loaded,
+        on_error=self._on_error,
+    )
+    # Guardar self._thread es obligatorio — mantiene _Receiver vivo.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QObject, QThread, Signal
+import threading
+from typing import Callable
+
+from PySide6.QtCore import QEvent, QObject, Slot
+from PySide6.QtWidgets import QApplication
 
 
-class Worker(QObject):
-    finished = Signal(object)
-    error = Signal(str)
+# IDs de evento personalizados (únicos por tipo)
+_DONE_EVENT_TYPE = QEvent.Type(QEvent.Type.User + 100)
+_ERROR_EVENT_TYPE = QEvent.Type(QEvent.Type.User + 101)
 
-    def __init__(self, fn, *args, **kwargs):
-        super().__init__()
-        self.fn = fn
-        self.args = args
-        self.kwargs = kwargs
 
-    def run(self) -> None:
+class _DoneEvent(QEvent):
+    def __init__(self, result):
+        super().__init__(_DONE_EVENT_TYPE)
+        self.result = result
+
+
+class _ErrorEvent(QEvent):
+    def __init__(self, msg: str):
+        super().__init__(_ERROR_EVENT_TYPE)
+        self.msg = msg
+
+
+class _Receiver(QObject):
+    """
+    QObject en el hilo principal que recibe eventos desde el hilo secundario.
+    QApplication.postEvent() es thread-safe y garantiza entrega en el hilo del receptor.
+    """
+
+    def __init__(
+        self,
+        on_done: Callable | None,
+        on_error: Callable | None,
+        parent: QObject | None = None,
+    ):
+        super().__init__(parent)
+        self._on_done = on_done
+        self._on_error = on_error
+
+    def customEvent(self, event: QEvent) -> None:
+        if event.type() == _DONE_EVENT_TYPE:
+            if self._on_done:
+                try:
+                    self._on_done(event.result)
+                except Exception:
+                    import traceback
+                    traceback.print_exc()
+        elif event.type() == _ERROR_EVENT_TYPE:
+            if self._on_error:
+                try:
+                    self._on_error(event.msg)
+                except Exception:
+                    import traceback
+                    traceback.print_exc()
+
+
+class _ThreadHandle:
+    """Devuelto por run_in_thread — mantiene receiver vivo vía referencia Python."""
+    def __init__(self, thread: threading.Thread, receiver: _Receiver):
+        self._thread = thread
+        self._receiver = receiver
+
+    def is_alive(self) -> bool:
+        return self._thread.is_alive()
+
+
+def run_in_thread(
+    parent: QObject | None,
+    fn: Callable,
+    *args,
+    on_done: Callable | None = None,
+    on_error: Callable | None = None,
+    **kwargs,
+) -> _ThreadHandle:
+    """
+    Ejecuta fn(*args, **kwargs) en un hilo secundario.
+    on_done(result) y on_error(msg) se llaman en el hilo principal via postEvent.
+    """
+    receiver = _Receiver(on_done, on_error, parent)
+
+    def task() -> None:
         try:
-            result = self.fn(*self.args, **self.kwargs)
-            self.finished.emit(result)
+            result = fn(*args, **kwargs)
+            # postEvent es thread-safe: entrega el evento al hilo de receiver (main)
+            QApplication.postEvent(receiver, _DoneEvent(result))
         except Exception as exc:
-            self.error.emit(str(exc))
+            QApplication.postEvent(receiver, _ErrorEvent(str(exc)))
 
-
-def run_in_thread(parent, fn, *args, on_done=None, on_error=None, **kwargs) -> QThread:
-    """
-    Ejecuta fn(*args, **kwargs) en un QThread.
-    on_done(result) y on_error(msg) son callbacks opcionales.
-    Devuelve el QThread (útil para guardar referencia).
-    """
-    thread = QThread(parent)
-    worker = Worker(fn, *args, **kwargs)
-    worker.moveToThread(thread)
-    thread.started.connect(worker.run)
-    if on_done:
-        worker.finished.connect(on_done)
-    if on_error:
-        worker.error.connect(on_error)
-    worker.finished.connect(thread.quit)
-    worker.finished.connect(worker.deleteLater)
-    thread.finished.connect(thread.deleteLater)
-    thread.start()
-    return thread
+    t = threading.Thread(target=task, daemon=True)
+    t.start()
+    return _ThreadHandle(t, receiver)
