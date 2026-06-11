@@ -1,11 +1,10 @@
 """
-Panel de navegación lateral de la aplicación.
+Panel de navegacion lateral de la aplicacion.
 """
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QFrame,
     QLabel,
     QPushButton,
     QSizePolicy,
@@ -25,7 +24,7 @@ class Sidebar(QWidget):
         """
         super().__init__(parent)
         self.setObjectName("Sidebar")
-        self.setFixedWidth(220)
+        self.setFixedWidth(196)
 
         self._buttons: dict[str, QPushButton] = {}
         self._active_key: str | None = None
@@ -34,11 +33,10 @@ class Sidebar(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # Cabecera
         header = QWidget()
         header.setObjectName("Sidebar")
         header_layout = QVBoxLayout(header)
-        header_layout.setContentsMargins(16, 16, 16, 8)
+        header_layout.setContentsMargins(14, 16, 14, 12)
         header_layout.setSpacing(2)
 
         title = QLabel(APP_NAME)
@@ -51,35 +49,37 @@ class Sidebar(QWidget):
 
         layout.addWidget(header)
 
-        sep = QFrame()
-        sep.setFrameShape(QFrame.Shape.HLine)
-        layout.addWidget(sep)
-
-        # Botones de navegación
         nav_container = QWidget()
         nav_container.setObjectName("Sidebar")
         nav_layout = QVBoxLayout(nav_container)
-        nav_layout.setContentsMargins(8, 8, 8, 8)
+        nav_layout.setContentsMargins(8, 6, 8, 8)
         nav_layout.setSpacing(2)
 
-        for key, label, _page_class, icon in pages:
+        main_group = QLabel("Trabajo")
+        main_group.setObjectName("SidebarGroup")
+        nav_layout.addWidget(main_group)
+
+        for key, label, _page_class, _icon in pages:
+            if key == "settings":
+                nav_layout.addStretch()
+                settings_group = QLabel("Sistema")
+                settings_group.setObjectName("SidebarGroup")
+                nav_layout.addWidget(settings_group)
+
             btn = QPushButton(f"  {label}")
             btn.setObjectName("navBtn")
             btn.setProperty("active", "false")
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-            btn.setFixedHeight(38)
+            btn.setFixedHeight(36)
             btn.clicked.connect(lambda checked, k=key: self._on_nav_click(k))
             nav_layout.addWidget(btn)
             self._buttons[key] = btn
 
-        nav_layout.addStretch()
         layout.addWidget(nav_container, stretch=1)
 
-        # Seleccionar la primera página por defecto
         if pages:
-            first_key = pages[0][0]
-            self.set_active(first_key)
+            self.set_active(pages[0][0])
 
     def _on_nav_click(self, key: str) -> None:
         self.set_active(key)

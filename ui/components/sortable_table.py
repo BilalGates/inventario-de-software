@@ -9,12 +9,14 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QHeaderView,
     QMenu,
+    QLabel,
     QVBoxLayout,
     QWidget,
 )
 from PySide6.QtWidgets import QTableView
 
 from ui.components.base_table_model import BaseTableModel
+from ui.components.ui_kit import EmptyState
 
 
 class SortableTable(QWidget):
@@ -40,6 +42,7 @@ class SortableTable(QWidget):
         self._headers = headers
         self._keys = keys or []
         self._source_model = BaseTableModel([], headers, keys)
+        self._empty_message = "No hay registros para mostrar"
 
         self._proxy = QSortFilterProxyModel(self)
         self._proxy.setSourceModel(self._source_model)
@@ -57,14 +60,20 @@ class SortableTable(QWidget):
         self._view.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         self._view.verticalHeader().setVisible(False)
         self._view.setShowGrid(False)
+        self._view.setWordWrap(False)
+        self._view.setAlternatingRowColors(True)
         self._view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._view.doubleClicked.connect(self._on_double_click)
         self._view.selectionModel().selectionChanged.connect(self._on_selection_changed)
         self._view.customContextMenuRequested.connect(self._on_context_menu)
 
+        self._empty_state = EmptyState(self._empty_message)
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self._view)
+        layout.addWidget(self._empty_state)
+        self._update_empty_state()
 
     # ------------------------------------------------------------------
     # Datos
@@ -75,9 +84,12 @@ class SortableTable(QWidget):
         # Ajustar columnas al contenido en la carga inicial
         for i in range(len(self._headers) - 1):
             self._view.resizeColumnToContents(i)
+        self._update_empty_state()
 
     def filter(self, text: str) -> None:
         self._proxy.setFilterFixedString(text)
+        self._empty_message = "No hay resultados para estos filtros" if text else "No hay registros para mostrar"
+        self._update_empty_state()
 
     # ------------------------------------------------------------------
     # Selección
@@ -129,3 +141,15 @@ class SortableTable(QWidget):
 
     def row_count(self) -> int:
         return self._proxy.rowCount()
+
+    def set_empty_message(self, message: str) -> None:
+        self._empty_message = message
+        self._update_empty_state()
+
+    def _update_empty_state(self) -> None:
+        is_empty = self._proxy.rowCount() == 0
+        self._view.setVisible(not is_empty)
+        self._empty_state.setVisible(is_empty)
+        label = self._empty_state.findChild(QLabel)
+        if label:
+            label.setText(self._empty_message)

@@ -1,22 +1,16 @@
 """
-Página de inicio — KPIs y estado por departamento.
+Pagina de inicio: KPIs y estado por departamento.
 """
 from __future__ import annotations
 
 from datetime import date
 from typing import TYPE_CHECKING
 
-from PySide6.QtWidgets import (
-    QHBoxLayout,
-    QLabel,
-    QMessageBox,
-    QPushButton,
-    QVBoxLayout,
-    QWidget,
-)
+from PySide6.QtWidgets import QLabel, QMessageBox, QPushButton, QVBoxLayout, QWidget
 
 from ui.components.metric_card import MetricCard
 from ui.components.sortable_table import SortableTable
+from ui.components.ui_kit import FeedbackBar, PageHeader
 from ui.components.worker import run_in_thread
 from ui.theme import COLORS
 
@@ -47,63 +41,67 @@ class DashboardPage(QWidget):
         c = COLORS
         layout = QVBoxLayout(self)
         layout.setContentsMargins(28, 24, 28, 24)
-        layout.setSpacing(20)
+        layout.setSpacing(14)
 
-        title = QLabel("Inventario Asserta")
-        title.setObjectName("labelTitle")
-        layout.addWidget(title)
+        self._export_btn = QPushButton("Exportar Excel")
+        self._export_btn.setObjectName("primary")
+        self._export_btn.clicked.connect(self._export_all)
 
-        # KPI cards
-        self._kpi_layout = QHBoxLayout()
-        self._kpi_layout.setSpacing(16)
-        layout.addLayout(self._kpi_layout)
+        header = PageHeader("Inventario Asserta", "Resumen de equipos, software y alertas operativas.")
+        header.add_action(self._export_btn)
+        layout.addWidget(header)
 
-        self._card_equipos = MetricCard("Equipos activos", "—")
-        self._card_software = MetricCard("Software activo", "—")
-        self._card_importaciones = MetricCard("Importaciones este mes", "—")
-        self._card_sin_disp = MetricCard("Software sin dispositivo", "—", color=c["warning"])
+        self._feedback = FeedbackBar()
+        layout.addWidget(self._feedback)
+
+        self._kpi_layout = QVBoxLayout()
+        self._kpi_layout.setSpacing(10)
+
+        kpi_row = QVBoxLayout()
+        kpi_row.setSpacing(10)
+        layout.addLayout(kpi_row)
+
+        from PySide6.QtWidgets import QHBoxLayout
+        cards = QHBoxLayout()
+        cards.setSpacing(12)
+        kpi_row.addLayout(cards)
+
+        self._card_equipos = MetricCard("Equipos activos", "-")
+        self._card_software = MetricCard("Software activo", "-")
+        self._card_importaciones = MetricCard("Importaciones este mes", "-")
+        self._card_sin_disp = MetricCard("Software sin dispositivo", "-", color=c["warning"])
 
         for card in (self._card_equipos, self._card_software, self._card_importaciones, self._card_sin_disp):
-            self._kpi_layout.addWidget(card)
-        self._kpi_layout.addStretch()
+            cards.addWidget(card)
+        cards.addStretch()
 
-        # Estado departamentos
         dept_label = QLabel("Estado por departamento")
         dept_label.setObjectName("labelSection")
         layout.addWidget(dept_label)
 
         self._dept_table = SortableTable(
-            headers=["Departamento", "Equipos activos", "Software visible", "Última importación", "Estado"],
+            headers=["Departamento", "Equipos activos", "Software visible", "Ultima importacion", "Estado"],
             keys=["departamento", "equipos_activos", "software_visible", "ultima_importacion", "estado_importacion"],
         )
         self._dept_table.setFixedHeight(220)
         layout.addWidget(self._dept_table)
 
-        # Alertas
-        alert_label = QLabel("Equipos con alertas (importación pendiente o sin responsable)")
+        alert_label = QLabel("Equipos con alertas")
         alert_label.setObjectName("labelSection")
         layout.addWidget(alert_label)
 
         self._alert_table = SortableTable(
-            headers=["Equipo", "Departamento", "Última importación", "Estado", "Responsable"],
+            headers=["Equipo", "Departamento", "Ultima importacion", "Estado", "Responsable"],
             keys=["nombre", "departamento_nombre", "ultima_importacion", "estado_importacion", "responsable"],
         )
+        self._alert_table.set_empty_message("No hay equipos con alertas pendientes")
         layout.addWidget(self._alert_table, stretch=1)
-
-        # Botón exportar
-        btn_row = QHBoxLayout()
-        self._export_btn = QPushButton("Exportar todo a Excel")
-        self._export_btn.setObjectName("primary")
-        self._export_btn.setFixedWidth(200)
-        self._export_btn.clicked.connect(self._export_all)
-        btn_row.addWidget(self._export_btn)
-        btn_row.addStretch()
-        layout.addLayout(btn_row)
 
     def on_activate(self) -> None:
         self._load_data()
 
     def _load_data(self) -> None:
+        self._feedback.show_message("Actualizando datos del inicio...", "info")
         self._thread = run_in_thread(
             self,
             _fetch_dashboard,
@@ -145,13 +143,16 @@ class DashboardPage(QWidget):
         ]
         self._alert_table.load_data(alertas[:100])
 
+        self._feedback.clear()
         if self.main_window:
-            self.main_window.set_status(f"Última actualización: {date.today()}")
+            self.main_window.set_status(f"Ultima actualizacion: {date.today()}")
 
     def _on_error(self, msg: str) -> None:
-        QMessageBox.critical(self, "Error de conexión", f"No se pudo cargar el dashboard:\n{msg}")
+        self._feedback.show_message(f"No se pudo cargar el dashboard: {msg}", "error")
+        QMessageBox.critical(self, "Error de conexion", f"No se pudo cargar el dashboard:\n{msg}")
 
     def _export_all(self) -> None:
+        self._export_btn.setEnabled(False)
         try:
             from database.connection import get_engine
             from modules.exportacion import generar_excel_completo
@@ -166,6 +167,10 @@ class DashboardPage(QWidget):
             if filename:
                 with open(filename, "wb") as f:
                     f.write(data)
-                QMessageBox.information(self, "Exportado", f"Excel guardado en:\n{filename}")
+                self._feedback.show_message(f"Excel guardado en {filename}.", "success")
+                if self.main_window:
+                    self.main_window.set_status("Excel exportado")
         except Exception as exc:
             QMessageBox.critical(self, "Error", f"No se pudo exportar:\n{exc}")
+        finally:
+            self._export_btn.setEnabled(True)

@@ -1,5 +1,5 @@
 """
-Ventana principal — sidebar izquierdo + QStackedWidget de páginas.
+Ventana principal con sidebar y paginas agrupadas.
 """
 from __future__ import annotations
 
@@ -13,27 +13,18 @@ from PySide6.QtWidgets import (
 
 from config import APP_NAME, APP_VERSION, WINDOW_MIN_HEIGHT, WINDOW_MIN_WIDTH
 from ui.components.sidebar import Sidebar
-
-# Importaciones diferidas para reducir tiempo de arranque
 from ui.pages.dashboard import DashboardPage
-from ui.pages.software_inventory import SoftwareInventoryPage
-from ui.pages.hardware_inventory import HardwareInventoryPage
-from ui.pages.ens_compliance import ENSCompliancePage
-from ui.pages.data_quality import DataQualityPage
-from ui.pages.departments import DepartmentsPage
+from ui.pages.grouped import AuditHubPage, InventoryHubPage
 from ui.pages.import_panda import ImportPandaPage
 from ui.pages.settings import SettingsPage
 
 
 PAGES = [
-    ("dashboard",   "Inicio",              DashboardPage,          "home"),
-    ("software",    "Inventario Software", SoftwareInventoryPage,  "laptop"),
-    ("hardware",    "Inventario Hardware", HardwareInventoryPage,  "cpu"),
-    ("ens",         "Auditoría ENS",       ENSCompliancePage,      "shield"),
-    ("quality",     "Calidad de Datos",    DataQualityPage,        "chart"),
-    ("departments", "Departamentos",       DepartmentsPage,        "building"),
-    ("import",      "Importar Panda",      ImportPandaPage,        "upload"),
-    ("settings",    "Configuración",       SettingsPage,           "settings"),
+    ("dashboard", "Inicio", DashboardPage, "home"),
+    ("inventory", "Inventario", InventoryHubPage, "laptop"),
+    ("import", "Importar", ImportPandaPage, "upload"),
+    ("audit", "Auditoria", AuditHubPage, "shield"),
+    ("settings", "Configuracion", SettingsPage, "settings"),
 ]
 
 
@@ -67,10 +58,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._stack, stretch=1)
 
         self.statusBar().showMessage("Listo")
-
-        # Navegar a la primera página y dispararle on_activate
-        first_key = PAGES[0][0]
-        self._navigate_to(first_key)
+        self._navigate_to(PAGES[0][0])
 
     def _navigate_to(self, key: str) -> None:
         if key not in self._pages:
@@ -82,7 +70,11 @@ class MainWindow(QMainWindow):
             page.on_activate()
 
     def navigate_to(self, key: str) -> None:
-        """API pública para que las páginas puedan navegar entre sí."""
+        """API publica para que las paginas puedan navegar entre si."""
+        if key in {"software", "hardware", "departments"}:
+            key = "inventory"
+        elif key in {"ens", "quality"}:
+            key = "audit"
         self._navigate_to(key)
 
     def set_status(self, message: str) -> None:

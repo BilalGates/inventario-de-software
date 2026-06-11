@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 from ui.components.sortable_table import SortableTable
+from ui.components.ui_kit import FeedbackBar
 from ui.components.worker import run_in_thread
 
 if TYPE_CHECKING:
@@ -164,6 +165,9 @@ class DepartmentsPage(QWidget):
 
         layout.addWidget(hdr_widget)
 
+        self._feedback = FeedbackBar()
+        layout.addWidget(self._feedback)
+
         # Tabs
         self._tabs = QTabWidget()
         layout.addWidget(self._tabs, stretch=1)
@@ -271,7 +275,7 @@ class DepartmentsPage(QWidget):
             from modules.software import ocultar_software_sin_dispositivos
             with get_engine().begin() as db:
                 hidden = ocultar_software_sin_dispositivos(db, self._dept["id"])
-            QMessageBox.information(self, "Limpieza", f"Registros ocultados: {hidden}")
+            self._feedback.show_message(f"Registros ocultados: {hidden}", "success")
             self._reload_inventario()
         except Exception as exc:
             QMessageBox.critical(self, "Error", str(exc))
@@ -353,7 +357,7 @@ class DepartmentsPage(QWidget):
                         QMessageBox.warning(self, "Error", "Ya existe un dispositivo con ese nombre.")
                         return
                     equipo_id = crear_equipo(db, self._dept["id"], name, user_input.text().strip() or None)
-                QMessageBox.information(self, "Creado", f"Dispositivo '{name}' creado (id {equipo_id}).")
+                self._feedback.show_message(f"Dispositivo '{name}' creado (id {equipo_id}).", "success")
                 self._reload_inventario()
             except Exception as exc:
                 QMessageBox.critical(self, "Error", str(exc))
@@ -441,11 +445,9 @@ class DepartmentsPage(QWidget):
         self._diff_table.load_data([])
         self._import_result_lbl.setText("")
         self._paste_area.clear()
-        QMessageBox.information(
-            self, "Importación completada",
-            f"Importación registrada (id {importacion_id}).\n"
-            f"Software exclusivo autorizado: {exclusivos}\n"
-            f"Reactivaciones pendientes: {pendientes}"
+        self._feedback.show_message(
+            f"Importacion registrada (id {importacion_id}). Software exclusivo: {exclusivos}. Reactivaciones pendientes: {pendientes}.",
+            "success",
         )
         self._reload_inventario()
 
@@ -499,7 +501,7 @@ class DepartmentsPage(QWidget):
         try:
             from modules.equipos import exportar_equipos_excel
             if not self._equipos:
-                QMessageBox.information(self, "Sin datos", "No hay equipos cargados.")
+                self._feedback.show_message("No hay equipos cargados.", "warning")
                 return
             dept_name = self._dept["nombre"] if self._dept else "Equipos"
             data = exportar_equipos_excel(self._equipos, dept_name)
@@ -514,7 +516,7 @@ class DepartmentsPage(QWidget):
         if filename:
             with open(filename, "wb") as f:
                 f.write(data)
-            QMessageBox.information(self, "Guardado", f"Archivo guardado en:\n{filename}")
+            self._feedback.show_message(f"Archivo guardado en {filename}.", "success")
 
     # ── Dispositivos ────────────────────────────────────────────────
 
@@ -571,7 +573,7 @@ class DepartmentsPage(QWidget):
             from modules.equipos import actualizar_usuario_dispositivo
             with get_engine().begin() as db:
                 actualizar_usuario_dispositivo(db, self._selected_equipo_id, self._user_input.text().strip() or None)
-            QMessageBox.information(self, "Guardado", "Usuario actualizado.")
+            self._feedback.show_message("Usuario actualizado.", "success")
         except Exception as exc:
             QMessageBox.critical(self, "Error", str(exc))
 
@@ -607,7 +609,7 @@ class DepartmentsPage(QWidget):
             with get_engine().begin() as db:
                 resolver_reactivacion(db, row["id"], accion)
             label = "reactivado" if accion == "reactivar" else "ignorado"
-            QMessageBox.information(self, "Hecho", f"Software {label}.")
+            self._feedback.show_message(f"Software {label}.", "success")
             self._load_react()
         except Exception as exc:
             QMessageBox.critical(self, "Error", str(exc))
