@@ -6,6 +6,7 @@ __pycache__/
 *.so
 *.dll
 .pytest_cache/
+.ruff_cache/
 .coverage
 .cache
 *.egg-info/
@@ -18,9 +19,11 @@ ENV/
 .venv/
 
 # Variables de entorno (NO commitear credenciales)
+# Se ignoran todos los .env reales; SOLO se versiona la plantilla .env.example
 .env
-.env.local
-*.env.*
+.env.*
+!.env.example
+!.env.sample
 
 # Build y distribución (NUNCA commitear binarios compilados)
 build/
@@ -44,7 +47,26 @@ logs/
 
 # Base de datos local
 *.db
+*.sqlite
 *.sqlite3
+
+# Backups / dumps SQL reales (NO commitear datos de inventario)
+# OJO: database/*.sql y migrations/*.sql SÍ se versionan (son schema/DDL, no datos).
+backups/
+*.sql.gz
+*.sql.zip
+*.dump
+*_backup.sql
+*_dump.sql
+
+# Datos internos de inventario (NUNCA commitear datos reales)
+# Los ficheros reales van fuera del repo; los ejemplos anónimos viven en resources/sample/.
+resources/*.csv
+resources/*.xls
+resources/*.xlsx
+resources/*.vbs
+resources/private/
+exports/
 
 # NiceGUI / Streamlit (eliminados — por si acaso)
 .nicegui/

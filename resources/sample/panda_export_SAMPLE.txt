@@ -1,0 +1,6 @@
+Nombre	Editor	Fecha de instalación	Tamaño	Versión
+Adobe Acrobat Reader - Español	Adobe Systems Incorporated	18/05/2026	1,2 GB	26.001.21563
+AnyDesk	AnyDesk Software GmbH	10/03/2026	2 MB	ad 9.0.10
+Anaconda3 2022.05 (Python 3.9.12 64-bit)	Anaconda, Inc.	30/01/2025	-	2022.05
+7-Zip 23.01 (x64 edition)	Igor Pavlov	12/02/2026	5,2 MB	23.01
+Demo App Interna	Editor Demo	01/01/2026	829,9 MB	7.4.2.1737

@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from config import DB_CONFIG, resource_path
+from config import DB_CONFIG, ensure_secure_db_config, resource_path
 
 
 class DatabaseInitError(RuntimeError):
@@ -23,6 +23,9 @@ class DatabaseInitError(RuntimeError):
 
 
 def _connect(database: str | None = None):
+    # Rechaza inicializar/migrar contra una BD insegura (root / contraseña vacía)
+    # salvo que se autorice explícitamente con ALLOW_INSECURE_LOCAL_DB=true.
+    ensure_secure_db_config()
     try:
         return pymysql.connect(
             host=DB_CONFIG["host"],
@@ -110,13 +113,17 @@ def _execute_sql_file(cursor, path: Path, ignore_errors: bool = False) -> None:
 
 
 def initialize_database() -> None:
+    # 1) Crea la BD y el schema BASE (idempotente: todo es IF NOT EXISTS).
     with _connect() as connection:
         with connection.cursor() as cursor:
             _execute_sql_file(cursor, resource_path("database", "schema.sql"))
             _execute_sql_file(cursor, resource_path("database", "seed.sql"), ignore_errors=True)
-            migrations_dir = resource_path("migrations")
-            for migration in sorted(migrations_dir.glob("*.sql")):
-                _execute_sql_file(cursor, migration, ignore_errors=True)
+
+    # 2) Aplica las migraciones PENDIENTES con control de versiones (schema_version).
+    #    Import diferido para evitar ciclo de importación con scripts.migrate_db.
+    from scripts.migrate_db import apply_pending_migrations
+
+    apply_pending_migrations()
 
 
 _ALLOWED_TABLES = frozenset({"software", "equipos", "departamentos", "importaciones", "software_autorizado"})

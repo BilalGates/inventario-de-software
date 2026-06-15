@@ -16,6 +16,12 @@ def build() -> None:
     icon_path = ROOT / "resources" / "icons" / "app.ico"
     icon_flag = f"--icon={icon_path}" if icon_path.exists() else []
 
+    # SEGURIDAD: NO se empaqueta `.env` dentro del .exe (contendría credenciales
+    # reales). El `.env` debe colocarse JUNTO al ejecutable distribuido; config.py
+    # lo carga desde el directorio del ejecutable en tiempo de ejecución.
+    #
+    # Tampoco se empaqueta la raíz de `resources/` (puede contener datos reales de
+    # inventario). Solo se incluyen los iconos y los ejemplos anónimos.
     cmd = [
         sys.executable, "-m", "PyInstaller",
         "--name", "InventarioAsserta",
@@ -23,10 +29,10 @@ def build() -> None:
         "--windowed",
         "--clean",
         "--noconfirm",
-        f"--add-data={ROOT / 'resources'}{os.pathsep}resources",
+        f"--add-data={ROOT / 'resources' / 'icons'}{os.pathsep}resources{os.sep}icons",
+        f"--add-data={ROOT / 'resources' / 'sample'}{os.pathsep}resources{os.sep}sample",
         f"--add-data={ROOT / 'database'}{os.pathsep}database",
         f"--add-data={ROOT / 'migrations'}{os.pathsep}migrations",
-        f"--add-data={ROOT / '.env'}{os.pathsep}.",
         "--hidden-import=pymysql",
         "--hidden-import=sqlalchemy.dialects.mysql",
         "--hidden-import=PySide6.QtSvg",
