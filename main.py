@@ -64,12 +64,22 @@ def main() -> None:
 
     from PySide6.QtWidgets import QApplication, QMessageBox
 
+    from config import InsecureDatabaseConfigError
+
     try:
-        from scripts.init_database import DatabaseInitError, setup_local_database
+        from scripts.init_database import DatabaseInitError, setup_local_database  # noqa: F401
         setup_local_database(
             import_historical=args.import_historical,
             force_import=args.force_import,
         )
+    except InsecureDatabaseConfigError as exc:
+        app = QApplication.instance() or QApplication(sys.argv)
+        QMessageBox.critical(
+            None,
+            "Configuración insegura de base de datos",
+            str(exc),
+        )
+        sys.exit(1)
     except Exception as exc:
         app = QApplication.instance() or QApplication(sys.argv)
         QMessageBox.critical(
