@@ -54,6 +54,28 @@ los re-imports desde Excel corromperían las versiones existentes.
 `utils/normalizer.py::clean_version()` convierte cualquier valor entrante (incluidos `float`/`int` de pandas)
 a `str` antes de persistir.
 
+**Sin comparaciones de orden**: nunca se comparan versiones con `>`/`<` (ni
+numérica ni lexicográficamente). Para decidir si actualizar la versión de
+referencia se usa `version_changed(old, new)` (igualdad sobre el texto limpio).
+Ver [adr/0002-versiones-como-texto.md](adr/0002-versiones-como-texto.md).
+
+### Migraciones y versionado de schema
+
+`database/schema.sql` define el **estado base**; `migrations/*.sql` son cambios
+**incrementales** versionados. El runner `scripts/migrate_db.py` registra cada
+migración aplicada en la tabla `schema_version` y aplica solo las pendientes
+(idempotente). `main.py --init-db` aplica el base y luego las migraciones
+pendientes. Detalle: [MODELO_DATOS.md](MODELO_DATOS.md#schema-base-vs-migraciones)
+y [adr/0003-migraciones-db.md](adr/0003-migraciones-db.md).
+
+### Seguridad de la conexión a BD
+
+`config.py::ensure_secure_db_config()` **bloquea el arranque** si la conexión es
+insegura (usuario `root` o contraseña vacía), salvo que se autorice
+explícitamente con `ALLOW_INSECURE_LOCAL_DB=true` (solo desarrollo local). La
+comprobación se aplica en `database/connection.py` y en `scripts/init_database.py`.
+Ver [SEGURIDAD.md](SEGURIDAD.md).
+
 ## Estructura de carpetas
 
 ```
@@ -100,17 +122,24 @@ inventario-asserta/
 │       └── settings.py           # Config BD + info app
 │
 ├── scripts/
-│   ├── init_database.py     # Inicialización BD (pymysql directo)
-│   ├── build_exe.py         # Compilación PyInstaller
+│   ├── init_database.py     # Inicialización BD (pymysql directo) + schema base
+│   ├── migrate_db.py        # Runner de migraciones versionadas (schema_version)
+│   ├── build_exe.py         # Compilación PyInstaller (sin .env ni datos reales)
 │   ├── migrate_excel.py     # Migración histórica desde Excel
-│   └── importar_equipos_csv.py
+│   ├── importar_equipos_csv.py
+│   ├── backup_db.py         # Backup MySQL (mysqldump)
+│   ├── restore_db.py        # Restauración MySQL (mysql)
+│   └── check_environment.py # Diagnóstico de entorno
 │
 └── resources/
-    ├── icons/               # app.ico (placeholder)
-    ├── Inventario_Equipos_Asserta.csv
-    ├── Inventario_Software_ENS_Por_Departamento.xlsx
-    └── Inventario_Software.vbs
+    ├── icons/               # iconos de la app
+    ├── sample/              # datos de EJEMPLO anónimos (versionados)
+    └── *.csv / *.xlsx / *.vbs   # datos REALES (ignorados por .gitignore, fuera del repo)
 ```
+
+> Los scripts de operación (`scripts/migrate_db.py`, `backup_db.py`,
+> `restore_db.py`, `check_environment.py`) y la documentación detallada están en
+> [docs/OPERACION.md](OPERACION.md).
 
 ## Flujo de importación Panda
 
