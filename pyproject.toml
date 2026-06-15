@@ -1,0 +1,18 @@
+# Configuración de herramientas de desarrollo (pytest + ruff).
+# No declara [project] ni [build-system] a propósito: este repo se ejecuta como
+# aplicación, no se instala como paquete. `pip install -r requirements.txt` no se
+# ve afectado por este fichero.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+extend-exclude = [".venv", "build", "dist", "dist_fixed"]
+
+[tool.ruff.lint]
+# Lint básico: errores de sintaxis (E9) y pyflakes (F = imports/variables sin usar,
+# nombres indefinidos). Conservador para no forzar refactors de estilo masivos.
+select = ["E9", "F"]

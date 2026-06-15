@@ -22,7 +22,7 @@ from __future__ import annotations
 import threading
 from typing import Callable
 
-from PySide6.QtCore import QEvent, QObject, Slot
+from PySide6.QtCore import QEvent, QObject
 from PySide6.QtWidgets import QApplication
 
 
