@@ -63,7 +63,9 @@ class BaseTableModel(QAbstractTableModel):
 
         if role == Qt.ItemDataRole.ToolTipRole:
             value = row.get(key)
-            return str(value) if value is not None else ""
+            # Solo mostramos tooltip en valores largos (que probablemente se truncan).
+            text = "" if value is None else str(value)
+            return text if len(text) > 24 else None
 
         return None
 

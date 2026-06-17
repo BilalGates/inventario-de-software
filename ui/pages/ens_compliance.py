@@ -1,18 +1,17 @@
 """
-Auditoria ENS: resumen de cumplimiento segun CCN-STIC Guia 105.
+Auditoría ENS: cumplimiento de software según CCN-STIC Guía 105.
 """
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from PySide6.QtWidgets import QLabel, QMessageBox, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QLabel, QPushButton, QVBoxLayout, QWidget
 
 from config import ENS_GUIDE_VERSION
-from ui.components.metric_card import MetricCard
+from ui.components.metric_card import MetricCard, MetricRow
 from ui.components.sortable_table import SortableTable
 from ui.components.ui_kit import FeedbackBar, PageHeader
 from ui.components.worker import run_in_thread
-from ui.theme import COLORS
 
 if TYPE_CHECKING:
     from ui.main_window import MainWindow
@@ -38,19 +37,13 @@ def _fetch_ens_data():
 
     total = len(rows)
     score = round(len(compliant) / total * 100, 1) if total else 0.0
-    return {
-        "compliant": compliant,
-        "non_compliant": non_compliant,
-        "pending": pending,
-        "total": total,
-        "score": score,
-    }
+    return {"compliant": compliant, "non_compliant": non_compliant,
+            "pending": pending, "total": total, "score": score}
 
 
-HEADERS_NC = ["Nombre norm.", "Fabricantes", "Versiones", "Departamentos", "Dispositivos"]
+HEADERS_NC = ["Nombre", "Fabricantes", "Versiones", "Departamentos", "Dispositivos"]
 KEYS_NC = ["nombre_norm", "fabricantes", "versiones", "departamentos", "dispositivos"]
-
-HEADERS_PEND = ["Nombre norm.", "Fabricantes", "Versiones", "Departamentos"]
+HEADERS_PEND = ["Nombre", "Fabricantes", "Versiones", "Departamentos"]
 KEYS_PEND = ["nombre_norm", "fabricantes", "versiones", "departamentos"]
 
 
@@ -63,17 +56,16 @@ class ENSCompliancePage(QWidget):
         self._build_ui()
 
     def _build_ui(self) -> None:
-        c = COLORS
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 20, 24, 20)
         layout.setSpacing(12)
 
         self._refresh_btn = QPushButton("Actualizar")
         self._refresh_btn.clicked.connect(self._load_data)
-        self._export_btn = QPushButton("Generar TXT")
+        self._export_btn = QPushButton("Generar informe")
+        self._export_btn.setObjectName("primary")
         self._export_btn.clicked.connect(self._export_report)
-
-        header = PageHeader(f"Auditoria ENS - {ENS_GUIDE_VERSION}", "Cumplimiento de software segun Guia 105.")
+        header = PageHeader(f"ENS · {ENS_GUIDE_VERSION}", "Cumplimiento del software según la Guía 105.")
         header.add_action(self._refresh_btn)
         header.add_action(self._export_btn)
         layout.addWidget(header)
@@ -81,29 +73,29 @@ class ENSCompliancePage(QWidget):
         self._feedback = FeedbackBar()
         layout.addWidget(self._feedback)
 
-        from PySide6.QtWidgets import QHBoxLayout
-        kpi_row = QHBoxLayout()
-        kpi_row.setSpacing(12)
-        self._card_score = MetricCard("Puntuacion global", "-", "% compliant", color=c["success"])
-        self._card_compliant = MetricCard("Compliant (Si)", "-", color=c["success"])
-        self._card_nc = MetricCard("No compliant", "-", color=c["danger"])
-        self._card_pending = MetricCard("Pendiente", "-", color=c["warning"])
+        kpis = MetricRow()
+        self._card_score = MetricCard("Cobertura", "—", "% clasificado en guía", tone="success")
+        self._card_compliant = MetricCard("En Guía 105", "—", tone="success")
+        self._card_nc = MetricCard("No en Guía 105", "—", tone="danger")
+        self._card_pending = MetricCard("Pendiente", "—", tone="warning")
         for card in (self._card_score, self._card_compliant, self._card_nc, self._card_pending):
-            kpi_row.addWidget(card)
-        kpi_row.addStretch()
-        layout.addLayout(kpi_row)
+            kpis.add_card(card)
+        layout.addWidget(kpis)
 
-        nc_label = QLabel("Software marcado como no incluido en Guia 105")
+        nc_label = QLabel("Software marcado como no incluido en Guía 105")
         nc_label.setObjectName("labelSection")
         layout.addWidget(nc_label)
         self._nc_table = SortableTable(headers=HEADERS_NC, keys=KEYS_NC)
-        self._nc_table.setFixedHeight(220)
+        self._nc_table.set_empty_content(title="Nada que reportar", message="No hay software marcado como fuera de la Guía 105.", icon="✓")
+        self._nc_table.setMinimumHeight(180)
         layout.addWidget(self._nc_table)
 
-        pend_label = QLabel("Software pendiente de revision")
+        pend_label = QLabel("Software pendiente de clasificar")
         pend_label.setObjectName("labelSection")
         layout.addWidget(pend_label)
         self._pend_table = SortableTable(headers=HEADERS_PEND, keys=KEYS_PEND)
+        self._pend_table.set_empty_content(
+            title="Todo clasificado", message="No queda software pendiente de revisar para la Guía 105.", icon="✓")
         layout.addWidget(self._pend_table, stretch=1)
 
     def on_activate(self) -> None:
@@ -112,26 +104,25 @@ class ENSCompliancePage(QWidget):
     def _load_data(self) -> None:
         self._refresh_btn.setEnabled(False)
         self._feedback.show_message("Cargando datos ENS...", "info")
-        self._thread = run_in_thread(self, _fetch_ens_data,
-                                     on_done=self._on_data_loaded, on_error=self._on_error)
+        self._thread = run_in_thread(self, _fetch_ens_data, on_done=self._on_data_loaded, on_error=self._on_error)
 
     def _on_data_loaded(self, result: dict) -> None:
         self._refresh_btn.setEnabled(True)
         self._last_result = result
         score = result["score"]
-        self._card_score.update_value(f"{score}%")
+        tone = "success" if score >= 80 else "warning" if score >= 50 else "danger"
+        self._card_score.update_value(f"{score}%", tone=tone)
         self._card_compliant.update_value(len(result["compliant"]))
         self._card_nc.update_value(len(result["non_compliant"]))
         self._card_pending.update_value(len(result["pending"]))
         self._nc_table.load_data(result["non_compliant"])
         self._pend_table.load_data(result["pending"])
         self._feedback.clear()
-        self.main_window.set_status("Auditoria ENS actualizada")
+        self.main_window.set_status("Auditoría ENS actualizada")
 
     def _on_error(self, msg: str) -> None:
         self._refresh_btn.setEnabled(True)
         self._feedback.show_message(f"Error cargando ENS: {msg}", "error")
-        QMessageBox.critical(self, "Error", f"Error cargando datos ENS:\n{msg}")
 
     def _export_report(self) -> None:
         if not self._last_result:
@@ -139,36 +130,33 @@ class ENSCompliancePage(QWidget):
             return
         result = self._last_result
         lines = [
-            f"INFORME DE AUDITORIA ENS - {ENS_GUIDE_VERSION}",
+            f"INFORME DE AUDITORÍA ENS - {ENS_GUIDE_VERSION}",
             "=" * 60,
             f"Total software analizado : {result['total']}",
-            f"Compliant (incluido)      : {len(result['compliant'])}",
-            f"No compliant              : {len(result['non_compliant'])}",
-            f"Pendiente de revision     : {len(result['pending'])}",
-            f"Puntuacion global         : {result['score']}%",
+            f"En Guía 105              : {len(result['compliant'])}",
+            f"No en Guía 105           : {len(result['non_compliant'])}",
+            f"Pendiente de clasificar  : {len(result['pending'])}",
+            f"Cobertura                : {result['score']}%",
             "",
-            "SOFTWARE NO COMPLIANT:",
+            "SOFTWARE NO EN GUÍA 105:",
             "-" * 40,
         ]
         for r in result["non_compliant"]:
             lines.append(f"  - {r.get('nombre_norm', '')} | {r.get('fabricantes', '')} | {r.get('versiones', '')}")
-        lines += ["", "SOFTWARE PENDIENTE DE REVISION:", "-" * 40]
+        lines += ["", "SOFTWARE PENDIENTE DE CLASIFICAR:", "-" * 40]
         for r in result["pending"]:
             lines.append(f"  - {r.get('nombre_norm', '')} | {r.get('fabricantes', '')}")
 
-        report_text = "\n".join(lines)
-        from PySide6.QtWidgets import QFileDialog
         from datetime import date
+
+        from PySide6.QtWidgets import QFileDialog
         filename, _ = QFileDialog.getSaveFileName(
-            self, "Guardar informe",
-            f"informe_ENS_{date.today().isoformat()}.txt",
-            "Texto (*.txt)",
-        )
+            self, "Guardar informe", f"informe_ENS_{date.today().isoformat()}.txt", "Texto (*.txt)")
         if filename:
             self._export_btn.setEnabled(False)
             try:
                 with open(filename, "w", encoding="utf-8") as f:
-                    f.write(report_text)
+                    f.write("\n".join(lines))
                 self._feedback.show_message(f"Informe guardado en {filename}.", "success")
                 self.main_window.set_status("Informe ENS exportado")
             finally:

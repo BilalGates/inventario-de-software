@@ -1,46 +1,56 @@
 """
-Widget de tabla con sort, filter por texto y selección de fila.
+Widget de tabla con sort, filtro por texto y selección de fila.
 Siempre QTableView + QAbstractTableModel — nunca QTableWidget.
 """
 from __future__ import annotations
+
+from typing import Callable
 
 from PySide6.QtCore import QSortFilterProxyModel, Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QHeaderView,
-    QMenu,
     QLabel,
+    QMenu,
+    QTableView,
     QVBoxLayout,
     QWidget,
 )
-from PySide6.QtWidgets import QTableView
 
 from ui.components.base_table_model import BaseTableModel
+from ui.components.status_badge import BadgeDelegate
 from ui.components.ui_kit import EmptyState
+from ui.tokens import HEIGHT
 
 
 class SortableTable(QWidget):
     """
     Tabla reutilizable con:
     - QTableView + BaseTableModel
-    - QSortFilterProxyModel (sort por columna, filter por texto en todas las cols)
-    - Selección de fila completa
-    - Señal row_activated (doble clic o Enter) → dict de la fila
-    - Señal selection_changed → dict | None
+    - QSortFilterProxyModel (sort por columna, filtro por texto en todas las cols)
+    - Selección de fila completa, alto de fila cómodo
+    - Columnas de estado renderizadas como badges (badge_keys)
+    - Señal row_activated (doble clic / Enter) → dict de la fila
+    - Señal selection_changed → dict | None (para paneles de detalle)
     """
 
     row_activated = Signal(dict)
     selection_changed = Signal(object)  # dict | None
 
+    _MAX_COL_WIDTH = 340
+    _MIN_COL_WIDTH = 70
+
     def __init__(
         self,
         headers: list[str],
         keys: list[str] | None = None,
+        badge_keys: list[str] | None = None,
         parent=None,
     ):
         super().__init__(parent)
         self._headers = headers
         self._keys = keys or []
+        self._badge_keys = badge_keys or []
         self._source_model = BaseTableModel([], headers, keys)
         self._empty_message = "No hay registros para mostrar"
 
@@ -54,18 +64,23 @@ class SortableTable(QWidget):
         self._view.setSortingEnabled(True)
         self._view.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self._view.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self._view.setAlternatingRowColors(True)
+        self._view.setAlternatingRowColors(False)
         self._view.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self._view.horizontalHeader().setStretchLastSection(True)
         self._view.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        self._view.horizontalHeader().setHighlightSections(False)
+        self._view.horizontalHeader().setMinimumSectionSize(self._MIN_COL_WIDTH)
         self._view.verticalHeader().setVisible(False)
+        self._view.verticalHeader().setDefaultSectionSize(HEIGHT["row"])
+        self._view.horizontalHeader().setFixedHeight(HEIGHT["header_row"])
         self._view.setShowGrid(False)
         self._view.setWordWrap(False)
-        self._view.setAlternatingRowColors(True)
         self._view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._view.doubleClicked.connect(self._on_double_click)
         self._view.selectionModel().selectionChanged.connect(self._on_selection_changed)
         self._view.customContextMenuRequested.connect(self._on_context_menu)
+
+        self._apply_badge_delegates()
 
         self._empty_state = EmptyState(self._empty_message)
 
@@ -76,19 +91,39 @@ class SortableTable(QWidget):
         self._update_empty_state()
 
     # ------------------------------------------------------------------
+    # Configuración
+    # ------------------------------------------------------------------
+
+    def _apply_badge_delegates(self) -> None:
+        for key in self._badge_keys:
+            if key in self._keys:
+                col = self._keys.index(key)
+                self._view.setItemDelegateForColumn(col, BadgeDelegate(self._view))
+
+    def view(self) -> QTableView:
+        return self._view
+
+    # ------------------------------------------------------------------
     # Datos
     # ------------------------------------------------------------------
 
     def load_data(self, data: list[dict]) -> None:
         self._source_model.refresh(data)
-        # Ajustar columnas al contenido en la carga inicial
-        for i in range(len(self._headers) - 1):
-            self._view.resizeColumnToContents(i)
+        self._auto_size_columns()
         self._update_empty_state()
+
+    def _auto_size_columns(self) -> None:
+        n = len(self._headers)
+        for i in range(n - 1):  # la última columna estira
+            self._view.resizeColumnToContents(i)
+            width = self._view.columnWidth(i)
+            self._view.setColumnWidth(i, max(self._MIN_COL_WIDTH, min(width + 16, self._MAX_COL_WIDTH)))
 
     def filter(self, text: str) -> None:
         self._proxy.setFilterFixedString(text)
-        self._empty_message = "No hay resultados para estos filtros" if text else "No hay registros para mostrar"
+        self._empty_message = (
+            "No hay resultados para este filtro" if text else "No hay registros para mostrar"
+        )
         self._update_empty_state()
 
     # ------------------------------------------------------------------
@@ -146,10 +181,23 @@ class SortableTable(QWidget):
         self._empty_message = message
         self._update_empty_state()
 
+    def set_empty_content(
+        self,
+        title: str | None = None,
+        message: str | None = None,
+        icon: str | None = None,
+        action_text: str | None = None,
+        on_action: Callable | None = None,
+    ) -> None:
+        if message is not None:
+            self._empty_message = message
+        self._empty_state.set_content(title, message, icon, action_text, on_action)
+        self._update_empty_state()
+
     def _update_empty_state(self) -> None:
         is_empty = self._proxy.rowCount() == 0
         self._view.setVisible(not is_empty)
         self._empty_state.setVisible(is_empty)
-        label = self._empty_state.findChild(QLabel)
+        label = self._empty_state.findChild(QLabel, "EmptyStateBody")
         if label:
             label.setText(self._empty_message)

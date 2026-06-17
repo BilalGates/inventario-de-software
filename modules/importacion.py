@@ -212,6 +212,40 @@ def ultima_importacion_por_equipos(db, equipo_ids: list[int]) -> dict[int, dict]
     return latest_by_equipo
 
 
+def listar_importaciones(db, limit: int = 200, departamento_id: int | None = None) -> list[dict]:
+    """Historial de importaciones confirmadas (solo lectura), más recientes primero."""
+    where = ["i.confirmada = TRUE"]
+    params: dict = {"limit": int(limit)}
+    if departamento_id is not None:
+        where.append("e.departamento_id = :departamento_id")
+        params["departamento_id"] = departamento_id
+    rows = db.execute(
+        text(
+            f"""
+            SELECT
+                i.id,
+                i.fecha_importacion,
+                i.metodo,
+                i.n_total,
+                i.n_nuevos,
+                i.n_actualizados,
+                i.n_eliminados,
+                i.n_cambios_version,
+                e.nombre AS equipo,
+                d.nombre AS departamento
+            FROM importaciones i
+            JOIN equipos e ON e.id = i.equipo_id
+            JOIN departamentos d ON d.id = e.departamento_id
+            WHERE {' AND '.join(where)}
+            ORDER BY i.fecha_importacion DESC, i.id DESC
+            LIMIT :limit
+            """
+        ),
+        params,
+    ).mappings().all()
+    return [dict(row) for row in rows]
+
+
 def _registrar_reactivacion_pendiente(db, software_id: int, equipo_id: int) -> None:
     db.execute(
         text(

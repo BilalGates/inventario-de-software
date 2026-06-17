@@ -1,5 +1,5 @@
 """
-Inventario de software: tabla principal con filtros, edicion y exportacion.
+Inventario de software: tabla con filtros, badges de estado y panel de detalle.
 """
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
     QMessageBox,
@@ -19,6 +20,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ui.components.detail_panel import DetailPanel
 from ui.components.sortable_table import SortableTable
 from ui.components.ui_kit import FeedbackBar, FilterBar, PageHeader
 from ui.components.worker import run_in_thread
@@ -27,49 +29,66 @@ if TYPE_CHECKING:
     from ui.main_window import MainWindow
 
 
-HEADERS = ["ID", "Codigo", "Nombre", "Fabricante", "Version", "Dispositivos", "Departamento", "Guia 105", "Clasificacion", "Observaciones"]
-KEYS = ["id", "codigo", "nombre", "fabricante", "version_referencia", "dispositivos", "departamento_nombre", "en_guia_105_str", "clasificacion_informacion", "observaciones"]
+HEADERS = ["Nombre", "Editor", "Versión", "Equipos", "Estado", "Última detección"]
+KEYS = ["nombre", "fabricante", "version", "n_equipos", "estado", "fecha"]
+
+
+def _guia_str(value) -> str:
+    return "Pendiente" if value is None else ("Sí" if value else "No")
+
+
+def _n_equipos(dispositivos: str) -> str:
+    if not dispositivos:
+        return "0"
+    return str(len([x for x in str(dispositivos).split(",") if x.strip()]))
+
+
+def _normalize(rows: list[dict], dept_view: bool) -> list[dict]:
+    out = []
+    for raw in rows:
+        r = dict(raw)
+        if dept_view:
+            fabricante = r.get("fabricante") or ""
+            version = str(r.get("version_referencia") or "")
+            departamento = r.get("departamento_nombre") or ""
+            clasificacion = r.get("clasificacion_informacion") or ""
+        else:
+            fabricante = r.get("fabricantes") or ""
+            version = str(r.get("versiones") or "")
+            departamento = r.get("departamentos") or ""
+            clasificacion = r.get("clasificaciones") or ""
+        dispositivos = r.get("dispositivos") or ""
+        r.update({
+            "nombre": r.get("nombre") or "",
+            "fabricante": fabricante,
+            "version": version,
+            "dispositivos": dispositivos,
+            "departamento": departamento,
+            "clasificacion": clasificacion,
+            "n_equipos": _n_equipos(dispositivos),
+            "estado": _guia_str(r.get("en_guia_105")),
+            "fecha": str(r.get("fecha_ultima_actualizacion") or "")[:10],
+        })
+        out.append(r)
+    return out
 
 
 def _fetch_all_software():
     from database.connection import get_engine
-    from modules.software import listar_inventario_empresa, listar_departamentos
+    from modules.software import listar_departamentos, listar_inventario_empresa
     with get_engine().connect() as db:
         depts = listar_departamentos(db)
         rows = listar_inventario_empresa(db)
-    dept_map = {d["id"]: d["nombre"] for d in depts}
-    result = []
-    for row in rows:
-        r = dict(row)
-        r["departamento_nombre"] = dept_map.get(r.get("departamento_id", 0), "")
-        r["en_guia_105_str"] = "Pendiente" if r.get("en_guia_105") is None else ("Si" if r.get("en_guia_105") else "No")
-        r["version_referencia"] = str(r.get("version_referencia") or "")
-        result.append(r)
-    return result
+    return depts, _normalize(rows, dept_view=False)
 
 
 def _fetch_software_by_dept(dept_id: int):
     from database.connection import get_engine
-    from modules.software import listar_inventario, obtener_departamento
+    from modules.software import listar_departamentos, listar_inventario
     with get_engine().connect() as db:
-        dept = obtener_departamento(db, dept_id)
+        depts = listar_departamentos(db)
         rows = listar_inventario(db, dept_id, en_guia_105="todos")
-    dept_name = dept["nombre"] if dept else ""
-    result = []
-    for row in rows:
-        r = dict(row)
-        r["departamento_nombre"] = dept_name
-        r["en_guia_105_str"] = "Pendiente" if r.get("en_guia_105") is None else ("Si" if r.get("en_guia_105") else "No")
-        r["version_referencia"] = str(r.get("version_referencia") or "")
-        result.append(r)
-    return result
-
-
-def _fetch_departamentos():
-    from database.connection import get_engine
-    from modules.software import listar_departamentos
-    with get_engine().connect() as db:
-        return listar_departamentos(db)
+    return depts, _normalize(rows, dept_view=True)
 
 
 class SoftwareInventoryPage(QWidget):
@@ -86,13 +105,21 @@ class SoftwareInventoryPage(QWidget):
         layout.setContentsMargins(24, 20, 24, 20)
         layout.setSpacing(12)
 
-        layout.addWidget(PageHeader("Inventario de Software", "Busca, filtra y revisa el software registrado. Doble clic para editar."))
+        self._import_btn = QPushButton("Importar Panda")
+        self._import_btn.clicked.connect(lambda: self.main_window.navigate_to("import"))
+        self._export_btn = QPushButton("Exportar CSV")
+        self._export_btn.setObjectName("primary")
+        self._export_btn.clicked.connect(self._export_csv)
+        header = PageHeader("Software", "Catálogo consolidado de software detectado en los equipos.")
+        header.add_action(self._import_btn)
+        header.add_action(self._export_btn)
+        layout.addWidget(header)
 
         self._feedback = FeedbackBar()
         layout.addWidget(self._feedback)
 
         toolbar = FilterBar()
-        self._search = FilterBar.search_box("Buscar en todas las columnas...")
+        self._search = FilterBar.search_box("Buscar por nombre, editor o versión...")
         self._search.textChanged.connect(self._apply_filters)
         toolbar.add_widget(self._search, stretch=1)
 
@@ -103,33 +130,70 @@ class SoftwareInventoryPage(QWidget):
         toolbar.add_widget(self._dept_combo)
 
         self._guia_combo = QComboBox()
-        self._guia_combo.addItems(["Todos", "Si", "No", "Pendiente"])
+        self._guia_combo.setMinimumWidth(140)
+        for label, data in (("Estado: todos", "Todos"), ("En Guía 105", "Sí"),
+                            ("No en Guía 105", "No"), ("Pendiente", "Pendiente")):
+            self._guia_combo.addItem(label, data)
         self._guia_combo.currentIndexChanged.connect(self._apply_filters)
         toolbar.add_widget(self._guia_combo)
 
-        self._export_btn = QPushButton("Exportar CSV")
-        self._export_btn.clicked.connect(self._export_csv)
-        toolbar.add_widget(self._export_btn)
+        self._clear_btn = QPushButton("Limpiar")
+        self._clear_btn.setObjectName("subtle")
+        self._clear_btn.clicked.connect(self._clear_filters)
+        toolbar.add_widget(self._clear_btn)
         layout.addWidget(toolbar)
 
-        self._table = SortableTable(headers=HEADERS, keys=KEYS)
-        self._table.row_activated.connect(self._on_row_activated)
-        self._table.selection_changed.connect(self._on_selection_changed)
-        layout.addWidget(self._table, stretch=1)
+        body = QHBoxLayout()
+        body.setSpacing(12)
+        self._table = SortableTable(headers=HEADERS, keys=KEYS, badge_keys=["estado"])
+        self._table.set_empty_content(
+            title="Sin software",
+            message="No hay software para estos filtros. Importa desde Panda o limpia los filtros.",
+            icon="🔎",
+            action_text="Importar desde Panda",
+            on_action=lambda: self.main_window.navigate_to("import"),
+        )
+        self._table.row_activated.connect(self._edit_row)
+        self._table.selection_changed.connect(self._on_selection)
+        body.addWidget(self._table, stretch=1)
+
+        self._detail = DetailPanel()
+        self._detail.closed.connect(self._table.clear_selection)
+        body.addWidget(self._detail)
+        layout.addLayout(body, stretch=1)
 
         self._status_label = QLabel("")
         self._status_label.setObjectName("labelMuted")
         layout.addWidget(self._status_label)
 
+    # ------------------------------------------------------------------
     def on_activate(self) -> None:
-        self._load_departamentos()
         self._load_data()
 
-    def _load_departamentos(self) -> None:
-        run_in_thread(self, _fetch_departamentos, on_done=self._on_depts_loaded)
+    def apply_navigation(self, payload: dict) -> None:
+        guia = payload.get("guia")
+        if guia:
+            for i in range(self._guia_combo.count()):
+                if self._guia_combo.itemData(i) == guia:
+                    self._guia_combo.setCurrentIndex(i)
+                    break
+            self._apply_filters()
 
-    def _on_depts_loaded(self, depts: list[dict]) -> None:
+    def _load_data(self) -> None:
+        self._feedback.show_message("Cargando inventario de software...", "info")
+        dept_id = self._dept_combo.currentData()
+        fetch = (lambda: _fetch_software_by_dept(dept_id)) if dept_id else _fetch_all_software
+        self._thread = run_in_thread(self, fetch, on_done=self._on_data_loaded, on_error=self._on_error)
+
+    def _on_data_loaded(self, result) -> None:
+        depts, data = result
         self._departamentos = depts
+        self._sync_dept_combo(depts)
+        self._all_data = data
+        self._apply_filters()
+        self._feedback.clear()
+
+    def _sync_dept_combo(self, depts: list[dict]) -> None:
         self._dept_combo.blockSignals(True)
         current = self._dept_combo.currentData()
         self._dept_combo.clear()
@@ -142,44 +206,51 @@ class SoftwareInventoryPage(QWidget):
                 break
         self._dept_combo.blockSignals(False)
 
-    def _load_data(self) -> None:
-        self._feedback.show_message("Cargando inventario de software...", "info")
-        dept_id = self._dept_combo.currentData()
-        if dept_id:
-            self._thread = run_in_thread(self, _fetch_software_by_dept, dept_id,
-                                         on_done=self._on_data_loaded, on_error=self._on_error)
-        else:
-            self._thread = run_in_thread(self, _fetch_all_software,
-                                         on_done=self._on_data_loaded, on_error=self._on_error)
-
-    def _on_data_loaded(self, data: list[dict]) -> None:
-        self._all_data = data
-        self._apply_filters()
-        self._feedback.clear()
-
     def _apply_filters(self) -> None:
-        guia_filter = self._guia_combo.currentText()
-        search_text = self._search.text()
-
-        if guia_filter == "Todos":
+        guia = self._guia_combo.currentData()
+        if guia in (None, "Todos"):
             filtered = self._all_data
         else:
-            filtered = [r for r in self._all_data if r.get("en_guia_105_str") == guia_filter]
-
+            filtered = [r for r in self._all_data if r.get("estado") == guia]
         self._table.load_data(filtered)
-        self._table.filter(search_text)
+        self._table.filter(self._search.text())
         self._status_label.setText(f"{self._table.row_count()} / {len(self._all_data)} registros")
+        self._detail.clear()
+
+    def _clear_filters(self) -> None:
+        self._search.clear()
+        self._guia_combo.setCurrentIndex(0)
+        self._apply_filters()
 
     def _on_dept_changed(self) -> None:
         self._load_data()
 
-    def _on_row_activated(self, row: dict) -> None:
+    def _on_selection(self, row) -> None:
+        if not row:
+            self._detail.clear()
+            return
+        edit_btn = QPushButton("Editar revisión")
+        edit_btn.setObjectName("primary")
+        edit_btn.clicked.connect(lambda: self._edit_row(row))
+        self._detail.show_details(
+            title=row.get("nombre", ""),
+            badges=[(row.get("estado", "Pendiente"), None)],
+            rows=[
+                ("Editor", row.get("fabricante")),
+                ("Versión(es)", row.get("version")),
+                ("Departamento(s)", row.get("departamento")),
+                ("Equipos afectados", row.get("dispositivos")),
+                ("Clasificación", row.get("clasificacion")),
+                ("Observaciones ENS", row.get("observaciones")),
+                ("Última detección", row.get("fecha")),
+            ],
+            actions=[edit_btn],
+        )
+
+    def _edit_row(self, row: dict) -> None:
         dlg = SoftwareEditDialog(row, self._departamentos, self)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             self._save_software(row["id"], dlg.get_values())
-
-    def _on_selection_changed(self, row) -> None:
-        pass
 
     def _save_software(self, software_id: int, values: dict) -> None:
         try:
@@ -189,19 +260,19 @@ class SoftwareInventoryPage(QWidget):
                 actualizar_software_revision(db, software_id, values)
             self._feedback.show_message("Software actualizado.", "success")
             self._load_data()
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             QMessageBox.critical(self, "Error", f"No se pudo guardar:\n{exc}")
 
     def _on_error(self, msg: str) -> None:
         self._feedback.show_message(f"Error cargando datos: {msg}", "error")
-        QMessageBox.critical(self, "Error", f"Error cargando datos:\n{msg}")
 
     def _export_csv(self) -> None:
         if not self._all_data:
             self._feedback.show_message("No hay datos para exportar.", "warning")
             return
-        from PySide6.QtWidgets import QFileDialog
         from datetime import date as dt
+
+        from PySide6.QtWidgets import QFileDialog
         filename, _ = QFileDialog.getSaveFileName(
             self, "Exportar CSV",
             f"inventario_software_{dt.today().isoformat()}.csv",
@@ -212,8 +283,9 @@ class SoftwareInventoryPage(QWidget):
         import csv
         self._export_btn.setEnabled(False)
         try:
+            fields = ["nombre", "fabricante", "version", "departamento", "dispositivos", "estado", "clasificacion", "fecha"]
             with open(filename, "w", newline="", encoding="utf-8-sig") as f:
-                writer = csv.DictWriter(f, fieldnames=KEYS, extrasaction="ignore")
+                writer = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
                 writer.writeheader()
                 writer.writerows(self._all_data)
             self._feedback.show_message(f"CSV guardado en {filename}.", "success")
@@ -227,35 +299,34 @@ class SoftwareEditDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Editar software")
         self.setMinimumWidth(480)
-        self._build_ui(row, departamentos)
+        self._build_ui(row)
 
-    def _build_ui(self, row: dict, departamentos: list[dict]) -> None:
+    def _build_ui(self, row: dict) -> None:
         layout = QFormLayout(self)
         layout.setSpacing(10)
 
         self._nombre = QLineEdit(str(row.get("nombre") or ""))
+        self._nombre.setReadOnly(True)
         layout.addRow("Nombre:", self._nombre)
 
         self._fabricante = QLineEdit(str(row.get("fabricante") or ""))
-        layout.addRow("Fabricante:", self._fabricante)
+        layout.addRow("Editor:", self._fabricante)
 
-        self._version = QLineEdit(str(row.get("version_referencia") or ""))
-        layout.addRow("Version (texto):", self._version)
+        self._version = QLineEdit(str(row.get("version") or ""))
+        layout.addRow("Versión (texto):", self._version)
 
         self._clasificacion = QComboBox()
-        for opt in ("Media", "Baja", "Alta", "Muy Alta"):
+        for opt in ("Baja", "Media", "Alta", "Muy Alta"):
             self._clasificacion.addItem(opt)
-        idx = self._clasificacion.findText(str(row.get("clasificacion_informacion") or "Media"))
+        idx = self._clasificacion.findText(str(row.get("clasificacion") or "Media"))
         if idx >= 0:
             self._clasificacion.setCurrentIndex(idx)
-        layout.addRow("Clasificacion:", self._clasificacion)
+        layout.addRow("Clasificación:", self._clasificacion)
 
         self._guia = QComboBox()
-        self._guia.addItems(["Pendiente", "Si", "No"])
-        val_map = {True: "Si", False: "No", None: "Pendiente"}
-        current = val_map.get(row.get("en_guia_105"), "Pendiente")
-        self._guia.setCurrentText(current)
-        layout.addRow("Guia 105:", self._guia)
+        self._guia.addItems(["Pendiente", "Sí", "No"])
+        self._guia.setCurrentText(row.get("estado", "Pendiente"))
+        layout.addRow("¿En Guía 105?:", self._guia)
 
         self._obs = QTextEdit(str(row.get("observaciones") or ""))
         self._obs.setFixedHeight(80)
@@ -272,6 +343,6 @@ class SoftwareEditDialog(QDialog):
             "fabricante": self._fabricante.text().strip() or None,
             "version_referencia": self._version.text().strip() or None,
             "clasificacion_informacion": self._clasificacion.currentText(),
-            "en_guia_105": {"Si": True, "No": False}.get(guia_raw),
+            "en_guia_105": {"Sí": True, "No": False}.get(guia_raw),
             "observaciones_elena": self._obs.toPlainText().strip() or None,
         }

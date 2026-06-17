@@ -1,85 +1,100 @@
 """
-Panel de navegacion lateral de la aplicacion.
+Panel de navegación lateral, agrupado por tareas y con iconos simples.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtWidgets import (
     QLabel,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
 
 from config import APP_NAME, APP_VERSION
+from ui.components.icons import icon
+from ui.theme import COLORS
+from ui.tokens import HEIGHT, SPACING
+
+# groups: list[ (group_label | None, [ (key, label, icon_name), ... ]) ]
+NavGroups = list
 
 
 class Sidebar(QWidget):
     page_changed = Signal(str)
 
-    def __init__(self, pages: list[tuple], parent=None):
-        """
-        pages: lista de (key, label, PageClass, icon_text)
-        """
+    def __init__(self, groups: NavGroups, parent=None):
         super().__init__(parent)
         self.setObjectName("Sidebar")
-        self.setFixedWidth(196)
+        self.setFixedWidth(216)
 
         self._buttons: dict[str, QPushButton] = {}
+        self._icon_names: dict[str, str] = {}
         self._active_key: str | None = None
+        self._first_key: str | None = None
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
+        # Cabecera (marca)
         header = QWidget()
         header.setObjectName("Sidebar")
         header_layout = QVBoxLayout(header)
-        header_layout.setContentsMargins(14, 16, 14, 12)
-        header_layout.setSpacing(2)
-
+        header_layout.setContentsMargins(SPACING["lg"], SPACING["lg"], SPACING["lg"], SPACING["md"])
+        header_layout.setSpacing(1)
         title = QLabel(APP_NAME)
         title.setObjectName("SidebarTitle")
         header_layout.addWidget(title)
-
         version_lbl = QLabel(f"v{APP_VERSION}")
         version_lbl.setObjectName("SidebarVersion")
         header_layout.addWidget(version_lbl)
+        root.addWidget(header)
 
-        layout.addWidget(header)
+        # Navegación (scroll por si crece)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
-        nav_container = QWidget()
-        nav_container.setObjectName("Sidebar")
-        nav_layout = QVBoxLayout(nav_container)
-        nav_layout.setContentsMargins(8, 6, 8, 8)
-        nav_layout.setSpacing(2)
+        nav = QWidget()
+        nav.setObjectName("Sidebar")
+        nav_layout = QVBoxLayout(nav)
+        nav_layout.setContentsMargins(SPACING["sm"], SPACING["xs"], SPACING["sm"], SPACING["md"])
+        nav_layout.setSpacing(1)
 
-        main_group = QLabel("Trabajo")
-        main_group.setObjectName("SidebarGroup")
-        nav_layout.addWidget(main_group)
+        for group_label, items in groups:
+            if group_label:
+                lbl = QLabel(group_label.upper())
+                lbl.setObjectName("SidebarGroup")
+                nav_layout.addWidget(lbl)
+            for key, label, icon_name in items:
+                nav_layout.addWidget(self._make_button(key, label, icon_name))
+                if self._first_key is None:
+                    self._first_key = key
 
-        for key, label, _page_class, _icon in pages:
-            if key == "settings":
-                nav_layout.addStretch()
-                settings_group = QLabel("Sistema")
-                settings_group.setObjectName("SidebarGroup")
-                nav_layout.addWidget(settings_group)
+        nav_layout.addStretch()
+        scroll.setWidget(nav)
+        root.addWidget(scroll, stretch=1)
 
-            btn = QPushButton(f"  {label}")
-            btn.setObjectName("navBtn")
-            btn.setProperty("active", "false")
-            btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-            btn.setFixedHeight(36)
-            btn.clicked.connect(lambda checked, k=key: self._on_nav_click(k))
-            nav_layout.addWidget(btn)
-            self._buttons[key] = btn
+        if self._first_key:
+            self.set_active(self._first_key)
 
-        layout.addWidget(nav_container, stretch=1)
-
-        if pages:
-            self.set_active(pages[0][0])
+    def _make_button(self, key: str, label: str, icon_name: str) -> QPushButton:
+        btn = QPushButton(f"  {label}")
+        btn.setObjectName("navBtn")
+        btn.setProperty("active", "false")
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        btn.setFixedHeight(HEIGHT["button"])
+        btn.setIcon(icon(icon_name, COLORS["text_secondary"]))
+        btn.setIconSize(QSize(18, 18))
+        btn.clicked.connect(lambda _checked=False, k=key: self._on_nav_click(k))
+        self._buttons[key] = btn
+        self._icon_names[key] = icon_name
+        return btn
 
     def _on_nav_click(self, key: str) -> None:
         self.set_active(key)
@@ -87,14 +102,16 @@ class Sidebar(QWidget):
 
     def set_active(self, key: str) -> None:
         if self._active_key and self._active_key in self._buttons:
-            btn = self._buttons[self._active_key]
-            btn.setProperty("active", "false")
-            btn.style().unpolish(btn)
-            btn.style().polish(btn)
+            prev = self._buttons[self._active_key]
+            prev.setProperty("active", "false")
+            prev.setIcon(icon(self._icon_names[self._active_key], COLORS["text_secondary"]))
+            prev.style().unpolish(prev)
+            prev.style().polish(prev)
 
         self._active_key = key
         if key in self._buttons:
             btn = self._buttons[key]
             btn.setProperty("active", "true")
+            btn.setIcon(icon(self._icon_names[key], COLORS["accent"]))
             btn.style().unpolish(btn)
             btn.style().polish(btn)
