@@ -214,7 +214,7 @@ class SoftwareAutorizadoPage(QWidget):
             return
         self._run_action(
             lambda db: _authorize_ids(db, [row["id"]]),
-            "Software autorizado.",
+            _authorization_message,
         )
 
     def _authorize_all(self) -> None:
@@ -229,7 +229,7 @@ class SoftwareAutorizadoPage(QWidget):
             ok_text="Autorizar todos",
         ):
             return
-        self._run_action(_authorize_all_exclusive, f"{n} programas autorizados.")
+        self._run_action(_authorize_all_exclusive, _authorization_message)
 
     def _promote_selected(self) -> None:
         row = self._promo_table.selected_row()
@@ -248,12 +248,13 @@ class SoftwareAutorizadoPage(QWidget):
             "Autorización promovida a general.",
         )
 
-    def _run_action(self, action, success_msg: str) -> None:
+    def _run_action(self, action, success_msg) -> None:
         try:
             from database.connection import get_engine
             with get_engine().begin() as db:
-                action(db)
-            self._feedback.show_message(success_msg, "success")
+                result = action(db)
+            message = success_msg(result) if callable(success_msg) else success_msg
+            self._feedback.show_message(message, "success")
             self._load_data()
         except Exception as exc:  # noqa: BLE001
             QMessageBox.critical(self, "Error", str(exc))
@@ -268,6 +269,14 @@ def _revoke_group(db, grupo):
 def _authorize_ids(db, ids):
     from modules.autorizado import autorizar_softwares
     return autorizar_softwares(db, ids, "Autorizado manualmente desde Software autorizado")
+
+
+def _authorization_message(n):
+    if not n:
+        return "El software seleccionado ya estaba autorizado."
+    if n == 1:
+        return "1 software autorizado."
+    return f"{n} programas autorizados."
 
 
 def _authorize_all_exclusive(db):

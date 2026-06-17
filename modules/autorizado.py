@@ -471,8 +471,70 @@ def detectar_software_exclusivo(db, departamento_id: int | None = None) -> list[
 def autorizar_softwares(db, software_ids: list[int], motivo: str) -> int:
     if not software_ids:
         return 0
-    inserted = 0
+    autorizados = 0
     for software_id in software_ids:
+        candidato = db.execute(
+            text(
+                """
+                SELECT
+                    s.id,
+                    s.departamento_id,
+                    s.nombre,
+                    s.fabricante,
+                    s.version_referencia,
+                    MIN(swe.equipo_id) AS equipo_id
+                FROM software s
+                LEFT JOIN software_equipo swe
+                  ON swe.software_id = s.id
+                 AND swe.presente = TRUE
+                WHERE s.id = :software_id
+                GROUP BY s.id, s.departamento_id, s.nombre, s.fabricante, s.version_referencia
+                """
+            ),
+            {"software_id": software_id},
+        ).mappings().first()
+        if not candidato:
+            continue
+
+        duplicado = db.execute(
+            text(
+                """
+                SELECT id, COALESCE(activo, TRUE) AS activo
+                FROM software_autorizado
+                WHERE software_id = :software_id
+                  AND departamento_id = :departamento_id
+                  AND (
+                      (equipo_id = :equipo_id)
+                      OR (equipo_id IS NULL AND :equipo_id IS NULL)
+                  )
+                ORDER BY COALESCE(activo, TRUE) DESC, id ASC
+                LIMIT 1
+                """
+            ),
+            {
+                "software_id": candidato["id"],
+                "departamento_id": candidato["departamento_id"],
+                "equipo_id": candidato["equipo_id"],
+            },
+        ).mappings().first()
+        if duplicado and duplicado["activo"]:
+            continue
+        if duplicado:
+            result = db.execute(
+                text(
+                    """
+                    UPDATE software_autorizado
+                    SET activo = TRUE,
+                        motivo = :motivo,
+                        fecha_autorizacion = NOW()
+                    WHERE id = :id
+                    """
+                ),
+                {"id": duplicado["id"], "motivo": motivo},
+            )
+            autorizados += int(result.rowcount or 0)
+            continue
+
         result = db.execute(
             text(
                 """
@@ -480,34 +542,24 @@ def autorizar_softwares(db, software_ids: list[int], motivo: str) -> int:
                     software_id, departamento_id, nombre, fabricante, version,
                     equipo_id, motivo, fecha_autorizacion, activo
                 )
-                SELECT
-                    s.id,
-                    s.departamento_id,
-                    s.nombre,
-                    s.fabricante,
-                    s.version_referencia,
-                    MIN(swe.equipo_id),
-                    :motivo,
-                    NOW(),
-                    TRUE
-                FROM software s
-                LEFT JOIN software_equipo swe
-                  ON swe.software_id = s.id
-                 AND swe.presente = TRUE
-                WHERE s.id = :software_id
-                  AND NOT EXISTS (
-                      SELECT 1
-                      FROM software_autorizado sa
-                      WHERE sa.software_id = s.id
-                        AND COALESCE(sa.activo, TRUE) = TRUE
-                  )
-                GROUP BY s.id, s.departamento_id, s.nombre, s.fabricante, s.version_referencia
+                VALUES (
+                    :software_id, :departamento_id, :nombre, :fabricante, :version,
+                    :equipo_id, :motivo, NOW(), TRUE
+                )
                 """
             ),
-            {"software_id": software_id, "motivo": motivo},
+            {
+                "software_id": candidato["id"],
+                "departamento_id": candidato["departamento_id"],
+                "nombre": candidato["nombre"],
+                "fabricante": candidato["fabricante"],
+                "version": candidato["version_referencia"],
+                "equipo_id": candidato["equipo_id"],
+                "motivo": motivo,
+            },
         )
-        inserted += int(result.rowcount or 0)
-    return inserted
+        autorizados += int(result.rowcount or 0)
+    return autorizados
 
 
 def autorizar_exclusivos_automaticamente(db, departamento_id: int | None = None) -> int:
