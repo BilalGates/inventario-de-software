@@ -6,7 +6,7 @@ from sqlalchemy import text
 
 from modules.autorizado import promover_todos_los_pendientes
 from modules.software import generar_codigo_software
-from utils.normalizer import clean_version, normalize_nombre
+from utils.normalizer import clean_version, normalize_nombre, version_changed
 
 
 def _program_key(program: dict) -> str:
@@ -61,8 +61,17 @@ def _load_context(db, equipo_id: int) -> tuple[dict, dict, dict]:
     return dict(equipo), catalogo, enlaces
 
 
-def calcular_diff(equipo_id, programas: list[dict], db) -> dict:
-    equipo, catalogo, enlaces = _load_context(db, equipo_id)
+def _compute_diff(equipo: dict, catalogo: dict, enlaces: dict, programas: list[dict]) -> dict:
+    """
+    Núcleo puro del cálculo de diff (sin acceso a BD).
+
+    `equipo`   : dict del equipo (debe incluir `departamento_id`).
+    `catalogo` : {nombre_norm: software_row} del departamento.
+    `enlaces`  : {software_id: software_equipo_row} presentes en el equipo.
+
+    No escribe en BD: solo calcula qué cambiaría. Extraído de `calcular_diff`
+    para poder testearlo sin MySQL.
+    """
     vistos_software_ids: set[int] = set()
     vistos_nombre_norm: set[str] = set()
     diff = {
@@ -106,6 +115,11 @@ def calcular_diff(equipo_id, programas: list[dict], db) -> dict:
         if software_id not in vistos_software_ids:
             diff["eliminados"].append(enlace)
     return diff
+
+
+def calcular_diff(equipo_id, programas: list[dict], db) -> dict:
+    equipo, catalogo, enlaces = _load_context(db, equipo_id)
+    return _compute_diff(equipo, catalogo, enlaces, programas)
 
 
 def ultima_importacion_por_equipo(db, equipo_id: int) -> dict | None:
@@ -518,7 +532,9 @@ def aplicar_diff(equipo_id, programas, diff, db, metodo) -> int:
             },
         )
         current_ref = programa.get("software", {}).get("version_referencia")
-        if nueva and (not current_ref or str(nueva) > str(current_ref)):
+        # Versiones como TEXTO: actualizamos la referencia cuando la versión
+        # detectada cambia (sin comparaciones lexicográficas/numéricas).
+        if version_changed(current_ref, nueva):
             db.execute(
                 text(
                     """

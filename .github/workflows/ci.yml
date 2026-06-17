@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dev dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Lint (ruff)
+        run: ruff check .
+
+      - name: Tests (pytest)
+        run: pytest -q
+
+# ---------------------------------------------------------------------------
+# NOTA — Integración con MySQL (pendiente)
+# ---------------------------------------------------------------------------
+# Los tests actuales son UNITARIOS y PUROS (no necesitan MySQL: usan dobles de
+# prueba / lógica pura). Por eso este workflow no levanta una base de datos.
+#
+# Cuando se añadan tests de integración que ejecuten SQL real, añadir un
+# servicio MySQL 8.0 al job, por ejemplo:
+#
+#   services:
+#     mysql:
+#       image: mysql:8.0
+#       env:
+#         MYSQL_ROOT_PASSWORD: root
+#         MYSQL_DATABASE: inventario_software_test
+#       ports:
+#         - 3306:3306
+#       options: >-
+#         --health-cmd="mysqladmin ping -h 127.0.0.1"
+#         --health-interval=10s --health-timeout=5s --health-retries=5
+#
+# y exportar DB_HOST/DB_PORT/DB_USER/DB_PASSWORD/DB_NAME + ALLOW_INSECURE_LOCAL_DB=true
+# antes de ejecutar los tests de integración.

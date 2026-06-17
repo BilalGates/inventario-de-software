@@ -1,0 +1,5 @@
+Nombre del Equipo;Departamento;Estado;Tipo de Dispositivo;Marca / Modelo;Nº de Serie BIOS;Dirección MAC;Sistema Operativo;Procesador;Memoria RAM;Almacenamiento;Responsable;Ubicación Física;Coste;Fecha de Adquisición;Es Servidor
+EQUIPO-DEMO-01;IT;Activo;Portátil;Fabricante Demo / Modelo X;SN-DEMO-0001;00:11:22:AA:BB:01;Windows 11 Pro;CPU Demo 8 núcleos;16 GB;512 GB SSD;Persona Demo 1;Oficina Demo;900,00;15/01/2025;No
+EQUIPO-DEMO-02;IT;Activo;Sobremesa;Fabricante Demo / Modelo Y;SN-DEMO-0002;00:11:22:AA:BB:02;Windows 11 Pro;CPU Demo 6 núcleos;32 GB;1 TB SSD;Persona Demo 2;Oficina Demo;1100,00;20/03/2025;No
+SRV-DEMO-01;Servidores;Activo;Servidor;Fabricante Demo / Rack Z;SN-DEMO-0003;00:11:22:AA:BB:03;Windows Server 2022;CPU Demo 16 núcleos;64 GB;2 TB SSD;Equipo de Sistemas;CPD Demo;3500,00;10/06/2024;Sí
+EQUIPO-DEMO-03;Silicon;Inactivo;Portátil;Fabricante Demo / Modelo X;SN-DEMO-0004;00:11:22:AA:BB:04;Windows 10 Pro;CPU Demo 4 núcleos;8 GB;256 GB SSD;Persona Demo 3;Almacén Demo;700,00;05/09/2023;No

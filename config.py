@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import os
 import sys
+import warnings
 from pathlib import Path
 from urllib.parse import quote_plus
 
@@ -67,6 +68,60 @@ def get_database_url() -> str:
         f"{user}:{password}"
         f"@{host}:{port}/{database}"
         "?charset=utf8mb4"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Seguridad de la conexión a BD
+# ---------------------------------------------------------------------------
+
+_TRUTHY = {"1", "true", "yes", "on", "si", "sí"}
+
+
+class InsecureDatabaseConfigError(RuntimeError):
+    """Se intentó usar una configuración de BD insegura sin autorizarla explícitamente."""
+
+
+def allow_insecure_local_db() -> bool:
+    """True si ALLOW_INSECURE_LOCAL_DB está activado (solo para desarrollo local)."""
+    return os.getenv("ALLOW_INSECURE_LOCAL_DB", "").strip().lower() in _TRUTHY
+
+
+def check_db_security(config: dict | None = None) -> list[str]:
+    """Devuelve la lista de problemas de seguridad de la configuración de BD (vacía si es segura)."""
+    config = config or DB_CONFIG
+    issues: list[str] = []
+    if str(config.get("user", "")).strip().lower() == "root":
+        issues.append("el usuario de BD es 'root'")
+    if not str(config.get("password", "") or ""):
+        issues.append("la contraseña de BD está vacía")
+    return issues
+
+
+def ensure_secure_db_config(config: dict | None = None) -> None:
+    """
+    Bloquea el arranque si la configuración de BD es insegura (root / contraseña vacía).
+
+    En desarrollo local se puede permitir explícitamente con ALLOW_INSECURE_LOCAL_DB=true,
+    en cuyo caso se emite solo una advertencia en lugar de un error.
+    """
+    issues = check_db_security(config)
+    if not issues:
+        return
+    detail = "; ".join(issues)
+    if allow_insecure_local_db():
+        warnings.warn(
+            f"Configuración de BD insegura permitida por ALLOW_INSECURE_LOCAL_DB: {detail}.",
+            stacklevel=2,
+        )
+        return
+    raise InsecureDatabaseConfigError(
+        "Configuración de base de datos insegura: "
+        + detail
+        + ".\n\nCrea un usuario MySQL dedicado y con contraseña (ver docs/OPERACION.md) "
+        "y configúralo en el fichero .env.\n"
+        "Solo para desarrollo local desechable puedes saltarte esta comprobación "
+        "estableciendo ALLOW_INSECURE_LOCAL_DB=true (no recomendado)."
     )
 
 

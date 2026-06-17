@@ -70,13 +70,21 @@ El ejecutable se genera en `dist/InventarioAsserta/InventarioAsserta.exe`.
 
 ## Configuración (.env)
 
+Copia `.env.example` a `.env` y usa un **usuario de BD dedicado** (no `root`):
+
 ```env
 DB_HOST=localhost
 DB_PORT=3306
 DB_NAME=inventario_software
-DB_USER=root
-DB_PASSWORD=
+DB_USER=inventario_app
+DB_PASSWORD=tu_contraseña
+# Solo desarrollo local desechable; deja false en cualquier entorno real:
+ALLOW_INSECURE_LOCAL_DB=false
 ```
+
+> ⚠️ La app **no arranca** con `root` o contraseña vacía salvo que
+> `ALLOW_INSECURE_LOCAL_DB=true`. Cómo crear los usuarios `inventario_app`
+> (datos) e `inventario_migrator` (DDL): ver [docs/OPERACION.md](docs/OPERACION.md).
 
 ## Primera puesta en marcha
 
@@ -86,9 +94,29 @@ DB_PASSWORD=
    - Lee `resources/Inventario_Equipos_Asserta.csv`
 3. Abrir la app: `python main.py`
 
-## Arquitectura
+## Seguridad de datos
 
-Ver `docs/ARQUITECTURA.md`.
+Esta herramienta maneja **inventario interno** (equipos, series, MAC, software por
+departamento). Reglas básicas:
+
+- **No subas datos reales al repo.** `.env`, `resources/*.csv|*.xlsx|*.vbs`,
+  `exports/`, `logs/`, `backups/` y los binarios están en `.gitignore`. Para
+  pruebas usa los ejemplos anónimos de [`resources/sample/`](resources/sample/).
+- **Usa un usuario MySQL dedicado** (no `root`); la app bloquea conexiones inseguras.
+- **Nunca `git push --force`** sin coordinación.
+
+Detalle completo (qué no subir, configurar `.env`, limpiar el historial con
+`git-filter-repo`): [docs/SEGURIDAD.md](docs/SEGURIDAD.md).
+
+## Documentación
+
+| Tema | Documento |
+|---|---|
+| Arquitectura | [docs/ARQUITECTURA.md](docs/ARQUITECTURA.md) |
+| Modelo de datos | [docs/MODELO_DATOS.md](docs/MODELO_DATOS.md) |
+| Operación (instalar, migrar, build, backups) | [docs/OPERACION.md](docs/OPERACION.md) |
+| Seguridad | [docs/SEGURIDAD.md](docs/SEGURIDAD.md) |
+| Decisiones (ADR) | [docs/adr/](docs/adr/) |
 
 ## Notas operativas
 

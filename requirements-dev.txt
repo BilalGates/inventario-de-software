@@ -1,0 +1,10 @@
+# Dependencias de desarrollo (no necesarias para ejecutar la app).
+# Instalar con:  pip install -r requirements-dev.txt
+
+-r requirements.txt
+
+# Tests
+pytest>=8.0
+
+# Lint
+ruff>=0.6

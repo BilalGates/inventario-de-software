@@ -13,11 +13,14 @@ from typing import Iterator
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 
-from config import get_database_url
+from config import ensure_secure_db_config, get_database_url
 
 
 @lru_cache(maxsize=1)
 def get_engine() -> Engine:
+    # Rechaza arrancar contra una BD insegura (root / contraseña vacía) salvo que
+    # se autorice explícitamente con ALLOW_INSECURE_LOCAL_DB=true.
+    ensure_secure_db_config()
     return create_engine(
         get_database_url(),
         pool_pre_ping=True,
