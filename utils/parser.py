@@ -54,6 +54,8 @@ def _is_header(row: list[Any]) -> bool:
 
 
 def _row_to_program(row: list[Any]) -> dict | None:
+    if len(row) < COLUMN_COUNT:
+        return None
     row = list(row[:COLUMN_COUNT]) + [None] * max(0, COLUMN_COUNT - len(row))
     nombre = _clean_text(row[0])
     if not nombre:

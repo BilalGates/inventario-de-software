@@ -3,9 +3,9 @@ from utils.parser import parse_paste
 
 
 PASTE_CON_CABECERA = (
-    "Nombre\tEditor\tFecha de instalación\tTamaño\tVersión\n"
+    "Nombre\tEditor\tFecha de instalacion\tTamano\tVersion\n"
     "Adobe Acrobat Reader\tAdobe Systems\t18/05/2026\t1,2 GB\t26.001.21563\n"
-    "\n"  # línea vacía -> debe ignorarse
+    "\n"
     "AnyDesk\tAnyDesk Software GmbH\t10/03/2026\t2 MB\tad 9.0.10\n"
 )
 
@@ -42,21 +42,16 @@ class TestParsePaste:
         assert programas[0]["version"] == "2022.05"
 
     def test_no_rompe_con_columnas_de_mas(self):
-        # Una fila con columnas inesperadas adicionales no debe romper el parseo.
         texto = "App X\tEditor\t01/01/2026\t10 MB\t1.2.3\tEXTRA\tOTRA\n"
         programas = parse_paste(texto)
         assert len(programas) == 1
         assert programas[0]["nombre"] == "App X"
         assert programas[0]["version"] == "1.2.3"
 
-    def test_no_rompe_con_columnas_de_menos(self):
-        # Solo nombre: el resto de campos quedan None, sin excepción.
+    def test_rechaza_columnas_de_menos(self):
         texto = "App Solo Nombre\n"
         programas = parse_paste(texto)
-        assert len(programas) == 1
-        assert programas[0]["nombre"] == "App Solo Nombre"
-        assert programas[0]["fabricante"] is None
-        assert programas[0]["version"] is None
+        assert programas == []
 
     def test_fecha_invalida_no_rompe(self):
         texto = "App\tEditor\tfecha-mala\t1 MB\t1.0\n"

@@ -1,6 +1,3 @@
-"""
-Ventana principal: sidebar agrupado por tareas + páginas planas en un QStackedWidget.
-"""
 from __future__ import annotations
 
 from PySide6.QtCore import QSettings
@@ -9,72 +6,46 @@ from PySide6.QtWidgets import QHBoxLayout, QMainWindow, QStackedWidget, QWidget
 from config import APP_NAME, APP_VERSION, WINDOW_MIN_HEIGHT, WINDOW_MIN_WIDTH
 from ui.components.sidebar import Sidebar
 from ui.pages.dashboard import DashboardPage
-from ui.pages.data_quality import DataQualityPage
 from ui.pages.departments import DepartmentsPage
-from ui.pages.ens_compliance import ENSCompliancePage
 from ui.pages.hardware_inventory import HardwareInventoryPage
-from ui.pages.historial import HistorialImportacionesPage
 from ui.pages.import_panda import ImportPandaPage
-from ui.pages.reactivaciones import ReactivacionesPage
-from ui.pages.review_center import ReviewCenterPage
 from ui.pages.settings import SettingsPage
-from ui.pages.software_autorizado import SoftwareAutorizadoPage
-from ui.pages.software_inventory import SoftwareInventoryPage
 
 
-# Navegación agrupada por tareas: (grupo | None, [(key, etiqueta, icono)])
 NAV_GROUPS = [
     (None, [("dashboard", "Inicio", "home")]),
     ("Inventario", [
-        ("software", "Software", "software"),
-        ("equipos", "Equipos", "device"),
+        ("equipos", "Dispositivos", "device"),
         ("departments", "Departamentos", "departments"),
     ]),
-    ("Control", [
-        ("autorizado", "Software autorizado", "shield"),
-        ("reactivaciones", "Reactivaciones", "refresh"),
-        ("review", "Centro de revisión", "inbox"),
+    ("Carga", [
+        ("import", "Importar software", "upload"),
     ]),
-    ("Importación", [
-        ("import", "Importar Panda", "upload"),
-        ("historial", "Historial", "clock"),
-    ]),
-    ("Auditoría", [
-        ("ens", "ENS / Guía 105", "audit"),
-        ("quality", "Calidad de datos", "database"),
-    ]),
-    ("Administración", [
-        ("settings", "Configuración", "settings"),
+    ("Administracion", [
+        ("settings", "Configuracion", "settings"),
     ]),
 ]
 
 PAGE_FACTORIES = {
     "dashboard": DashboardPage,
-    "software": SoftwareInventoryPage,
     "equipos": HardwareInventoryPage,
     "departments": DepartmentsPage,
-    "autorizado": SoftwareAutorizadoPage,
-    "reactivaciones": ReactivacionesPage,
-    "review": ReviewCenterPage,
     "import": ImportPandaPage,
-    "historial": HistorialImportacionesPage,
-    "ens": ENSCompliancePage,
-    "quality": DataQualityPage,
     "settings": SettingsPage,
 }
 
-# Alias para navegación interna entre páginas (compatibilidad con claves antiguas).
 NAV_ALIASES = {
     "hardware": "equipos",
-    "inventory": "software",
-    "audit": "ens",
+    "inventory": "departments",
+    "software": "departments",
+    "monthly_v3": "departments",
 }
 
 
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle(f"{APP_NAME} · v{APP_VERSION}")
+        self.setWindowTitle(f"{APP_NAME} - v{APP_VERSION}")
         self.setMinimumSize(WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT)
         self._restore_geometry()
         self._build_ui()
@@ -115,7 +86,6 @@ class MainWindow(QMainWindow):
             page.apply_navigation(payload)
 
     def navigate_to(self, key: str, payload: dict | None = None) -> None:
-        """API pública para que las páginas naveguen entre sí (con filtros opcionales)."""
         self._navigate_to(key, payload)
 
     def set_status(self, message: str) -> None:
