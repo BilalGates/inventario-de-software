@@ -232,6 +232,7 @@ class SectionCard(QFrame):
         self._outer.setContentsMargins(SPACING["lg"], SPACING["md"], SPACING["lg"], SPACING["lg"])
         self._outer.setSpacing(SPACING["md"])
 
+        self._has_header = bool(title)
         self._header_row = QHBoxLayout()
         self._header_row.setSpacing(SPACING["sm"])
         self._title = QLabel(title or "")
@@ -239,7 +240,8 @@ class SectionCard(QFrame):
         self._title.setVisible(bool(title))
         self._header_row.addWidget(self._title)
         self._header_row.addStretch()
-        self._outer.addLayout(self._header_row)
+        if self._has_header:
+            self._outer.addLayout(self._header_row)
 
         self.body = QVBoxLayout()
         self.body.setSpacing(SPACING["sm"])
@@ -248,8 +250,14 @@ class SectionCard(QFrame):
     def set_title(self, title: str) -> None:
         self._title.setText(title or "")
         self._title.setVisible(bool(title))
+        if title and not self._has_header:
+            self._outer.insertLayout(0, self._header_row)
+            self._has_header = True
 
     def add_header_action(self, widget: QWidget) -> None:
+        if not self._has_header:
+            self._outer.insertLayout(0, self._header_row)
+            self._has_header = True
         self._header_row.addWidget(widget)
 
     def add_widget(self, widget: QWidget, stretch: int = 0) -> None:

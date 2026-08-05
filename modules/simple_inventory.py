@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from hashlib import sha256
 from datetime import date
 from io import BytesIO
 from typing import Any
@@ -10,6 +11,7 @@ from openpyxl.styles import Font, PatternFill
 from sqlalchemy import text
 
 from utils.panda_parser import parse_panda_text
+from utils.normalizer import normalize_nombre
 
 
 PERIODO_RE = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
@@ -158,14 +160,15 @@ def software_por_departamento(periodo: str, departamento_id: int, db=None) -> li
     return [dict(row) for row in rows]
 
 
-def equipos_estado_mensual(periodo: str, departamento_id: int, db=None) -> list[dict]:
+def equipos_estado_mensual(periodo: str, departamento_id: int, db=None, solo_activos: bool = True) -> list[dict]:
     if db is None:
         with _engine().connect() as conn:
-            return equipos_estado_mensual(periodo, departamento_id, db=conn)
+            return equipos_estado_mensual(periodo, departamento_id, db=conn, solo_activos=solo_activos)
     periodo = validate_periodo(periodo)
+    active_filter = "AND e.activo = TRUE" if solo_activos else ""
     rows = db.execute(
         text(
-            """
+            f"""
             SELECT
                 e.id,
                 e.nombre,
@@ -182,7 +185,7 @@ def equipos_estado_mensual(periodo: str, departamento_id: int, db=None) -> list[
              AND imp.periodo = :periodo
              AND imp.estado = 'confirmed'
             WHERE e.departamento_id = :departamento_id
-              AND e.activo = TRUE
+              {active_filter}
             ORDER BY imp.id IS NULL DESC, e.nombre
             """
         ),
@@ -191,12 +194,365 @@ def equipos_estado_mensual(periodo: str, departamento_id: int, db=None) -> list[
     result = []
     for row in rows:
         item = dict(row)
-        item["estado_importacion"] = "Importado" if item.get("importacion_id") else "Pendiente"
+        if not item.get("activo"):
+            item["estado_importacion"] = "Inactivo"
+        else:
+            item["estado_importacion"] = "Importado" if item.get("importacion_id") else "Pendiente"
         item["fecha_importacion_str"] = str(item.get("fecha_importacion") or "")[:19]
         item["n_programas"] = item.get("n_programas") or 0
         item["usuario"] = item.get("usuario") or ""
         result.append(item)
     return result
+
+
+def software_dispositivos_mensual(periodo: str, departamento_id: int, nombre_norm: str, db=None) -> list[dict]:
+    if db is None:
+        with _engine().connect() as conn:
+            return software_dispositivos_mensual(periodo, departamento_id, nombre_norm, db=conn)
+    periodo = validate_periodo(periodo)
+    rows = db.execute(
+        text(
+            """
+            SELECT
+                e.id,
+                e.nombre,
+                e.notas AS usuario,
+                e.activo,
+                EXISTS (
+                    SELECT 1
+                    FROM software_instalado si
+                    JOIN software_importaciones imp ON imp.id = si.importacion_id
+                    WHERE imp.estado = 'confirmed'
+                      AND imp.periodo = :periodo
+                      AND si.equipo_id = e.id
+                      AND si.departamento_id = :departamento_id
+                      AND si.nombre_norm = :nombre_norm
+                ) AS instalado
+            FROM equipos e
+            WHERE e.departamento_id = :departamento_id
+              AND e.activo = TRUE
+            ORDER BY e.nombre
+            """
+        ),
+        {"periodo": periodo, "departamento_id": departamento_id, "nombre_norm": nombre_norm},
+    ).mappings().all()
+    return [{**dict(row), "instalado": bool(row["instalado"])} for row in rows]
+
+
+def _program_payload(data: dict) -> dict:
+    nombre = str(data.get("nombre") or "").strip()
+    if not nombre:
+        raise ValueError("El nombre del programa es obligatorio.")
+    fabricante = str(data.get("fabricante") or "").strip()
+    version = str(data.get("version") or "").strip()
+    tamano = str(data.get("tamano") or "").strip()
+    return {
+        "nombre": nombre,
+        "nombre_norm": normalize_nombre(nombre),
+        "fabricante": fabricante or None,
+        "fabricante_norm": normalize_nombre(fabricante) if fabricante else None,
+        "version": version or None,
+        "tamano": tamano or None,
+    }
+
+
+def _confirmed_import_ids(db, periodo: str, departamento_id: int, nombre_norm: str) -> list[int]:
+    rows = db.execute(
+        text(
+            """
+            SELECT DISTINCT imp.id
+            FROM software_importaciones imp
+            JOIN software_instalado si ON si.importacion_id = imp.id
+            WHERE imp.periodo = :periodo
+              AND imp.departamento_id = :departamento_id
+              AND imp.estado = 'confirmed'
+              AND si.nombre_norm = :nombre_norm
+            """
+        ),
+        {"periodo": periodo, "departamento_id": departamento_id, "nombre_norm": nombre_norm},
+    ).mappings().all()
+    return [int(row["id"]) for row in rows]
+
+
+def _refresh_program_count(db, importacion_id: int) -> None:
+    db.execute(
+        text(
+            """
+            UPDATE software_importaciones
+            SET n_programas = (
+                SELECT COUNT(*)
+                FROM software_instalado
+                WHERE importacion_id = :importacion_id
+            )
+            WHERE id = :importacion_id
+            """
+        ),
+        {"importacion_id": importacion_id},
+    )
+
+
+def _ensure_manual_import(db, equipo_id: int, departamento_id: int, periodo: str) -> int:
+    row = db.execute(
+        text(
+            """
+            SELECT id
+            FROM software_importaciones
+            WHERE equipo_id = :equipo_id
+              AND periodo = :periodo
+              AND estado = 'confirmed'
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ),
+        {"equipo_id": equipo_id, "periodo": periodo},
+    ).mappings().first()
+    if row:
+        return int(row["id"])
+
+    digest = sha256(f"manual:{equipo_id}:{periodo}".encode("utf-8")).hexdigest()
+    result = db.execute(
+        text(
+            """
+            INSERT INTO software_importaciones (
+                equipo_id, departamento_id, periodo, fecha_importacion,
+                raw_hash, raw_text, estado, n_programas, n_errores, origen, notas
+            )
+            VALUES (
+                :equipo_id, :departamento_id, :periodo, NOW(),
+                :raw_hash, '', 'confirmed', 0, 0, 'manual', 'Ajuste manual desde Inventario'
+            )
+            """
+        ),
+        {
+            "equipo_id": equipo_id,
+            "departamento_id": departamento_id,
+            "periodo": periodo,
+            "raw_hash": digest,
+        },
+    )
+    return int(result.lastrowid)
+
+
+def _next_source_row(db, importacion_id: int) -> int:
+    value = db.execute(
+        text(
+            """
+            SELECT COALESCE(MAX(source_row), 0) + 1
+            FROM software_instalado
+            WHERE importacion_id = :importacion_id
+            """
+        ),
+        {"importacion_id": importacion_id},
+    ).scalar()
+    return int(value or 1)
+
+
+def actualizar_software_mensual(
+    periodo: str,
+    departamento_id: int,
+    nombre_norm: str,
+    data: dict,
+    db=None,
+) -> None:
+    if db is None:
+        with _engine().begin() as conn:
+            return actualizar_software_mensual(periodo, departamento_id, nombre_norm, data, db=conn)
+    periodo = validate_periodo(periodo)
+    payload = _program_payload(data)
+    import_ids = _confirmed_import_ids(db, periodo, departamento_id, nombre_norm)
+    db.execute(
+        text(
+            """
+            UPDATE software_instalado si
+            JOIN software_importaciones imp ON imp.id = si.importacion_id
+            SET
+                si.nombre = :nombre,
+                si.nombre_norm = :new_nombre_norm,
+                si.fabricante = :fabricante,
+                si.fabricante_norm = :fabricante_norm,
+                si.version = :version,
+                si.tamano = COALESCE(:tamano, si.tamano)
+            WHERE imp.periodo = :periodo
+              AND imp.departamento_id = :departamento_id
+              AND imp.estado = 'confirmed'
+              AND si.nombre_norm = :old_nombre_norm
+            """
+        ),
+        {
+            **payload,
+            "new_nombre_norm": payload["nombre_norm"],
+            "old_nombre_norm": nombre_norm,
+            "periodo": periodo,
+            "departamento_id": departamento_id,
+        },
+    )
+    for importacion_id in import_ids:
+        _refresh_program_count(db, importacion_id)
+
+
+def eliminar_software_mensual(periodo: str, departamento_id: int, nombre_norm: str, db=None) -> None:
+    if db is None:
+        with _engine().begin() as conn:
+            return eliminar_software_mensual(periodo, departamento_id, nombre_norm, db=conn)
+    periodo = validate_periodo(periodo)
+    import_ids = _confirmed_import_ids(db, periodo, departamento_id, nombre_norm)
+    db.execute(
+        text(
+            """
+            DELETE si
+            FROM software_instalado si
+            JOIN software_importaciones imp ON imp.id = si.importacion_id
+            WHERE imp.periodo = :periodo
+              AND imp.departamento_id = :departamento_id
+              AND imp.estado = 'confirmed'
+              AND si.nombre_norm = :nombre_norm
+            """
+        ),
+        {"periodo": periodo, "departamento_id": departamento_id, "nombre_norm": nombre_norm},
+    )
+    for importacion_id in import_ids:
+        _refresh_program_count(db, importacion_id)
+
+
+def set_software_dispositivos_mensual(
+    periodo: str,
+    departamento_id: int,
+    old_nombre_norm: str | None,
+    data: dict,
+    equipo_ids: list[int],
+    db=None,
+) -> None:
+    if db is None:
+        with _engine().begin() as conn:
+            return set_software_dispositivos_mensual(
+                periodo, departamento_id, old_nombre_norm, data, equipo_ids, db=conn
+            )
+    periodo = validate_periodo(periodo)
+    payload = _program_payload(data)
+    selected_ids = {int(equipo_id) for equipo_id in equipo_ids}
+    target_norm = old_nombre_norm or payload["nombre_norm"]
+    touched_imports = set(_confirmed_import_ids(db, periodo, departamento_id, target_norm))
+
+    if old_nombre_norm and old_nombre_norm != payload["nombre_norm"]:
+        actualizar_software_mensual(periodo, departamento_id, old_nombre_norm, payload, db=db)
+        target_norm = payload["nombre_norm"]
+
+    rows = db.execute(
+        text(
+            """
+            SELECT id
+            FROM equipos
+            WHERE departamento_id = :departamento_id
+              AND activo = TRUE
+            """
+        ),
+        {"departamento_id": departamento_id},
+    ).mappings().all()
+    active_ids = {int(row["id"]) for row in rows}
+    selected_ids &= active_ids
+
+    for equipo_id in sorted(active_ids - selected_ids):
+        import_rows = db.execute(
+            text(
+                """
+                SELECT DISTINCT imp.id
+                FROM software_importaciones imp
+                JOIN software_instalado si ON si.importacion_id = imp.id
+                WHERE imp.equipo_id = :equipo_id
+                  AND imp.periodo = :periodo
+                  AND imp.estado = 'confirmed'
+                  AND si.nombre_norm = :nombre_norm
+                """
+            ),
+            {"equipo_id": equipo_id, "periodo": periodo, "nombre_norm": target_norm},
+        ).mappings().all()
+        for row in import_rows:
+            touched_imports.add(int(row["id"]))
+        db.execute(
+            text(
+                """
+                DELETE si
+                FROM software_instalado si
+                JOIN software_importaciones imp ON imp.id = si.importacion_id
+                WHERE imp.equipo_id = :equipo_id
+                  AND imp.periodo = :periodo
+                  AND imp.estado = 'confirmed'
+                  AND si.nombre_norm = :nombre_norm
+                """
+            ),
+            {"equipo_id": equipo_id, "periodo": periodo, "nombre_norm": target_norm},
+        )
+
+    raw_line = "\t".join(
+        [
+            payload["nombre"],
+            payload.get("fabricante") or "",
+            "",
+            payload.get("tamano") or "",
+            payload.get("version") or "",
+        ]
+    )
+    for equipo_id in sorted(selected_ids):
+        importacion_id = _ensure_manual_import(db, equipo_id, departamento_id, periodo)
+        touched_imports.add(importacion_id)
+        existing = db.execute(
+            text(
+                """
+                SELECT si.id
+                FROM software_instalado si
+                WHERE si.importacion_id = :importacion_id
+                  AND si.nombre_norm = :nombre_norm
+                LIMIT 1
+                """
+            ),
+            {"importacion_id": importacion_id, "nombre_norm": target_norm},
+        ).mappings().first()
+        if existing:
+            db.execute(
+                text(
+                    """
+                    UPDATE software_instalado
+                    SET nombre = :nombre,
+                        nombre_norm = :nombre_norm,
+                        fabricante = :fabricante,
+                        fabricante_norm = :fabricante_norm,
+                        tamano = COALESCE(:tamano, tamano),
+                        version = :version,
+                        raw_line = :raw_line
+                    WHERE id = :row_id
+                    """
+                ),
+                {**payload, "raw_line": raw_line, "row_id": existing["id"]},
+            )
+        else:
+            db.execute(
+                text(
+                    """
+                    INSERT INTO software_instalado (
+                        importacion_id, equipo_id, departamento_id, periodo, source_row,
+                        nombre, nombre_norm, fabricante, fabricante_norm,
+                        fecha_instalacion, tamano, version, raw_line
+                    )
+                    VALUES (
+                        :importacion_id, :equipo_id, :departamento_id, :periodo, :source_row,
+                        :nombre, :nombre_norm, :fabricante, :fabricante_norm,
+                        NULL, :tamano, :version, :raw_line
+                    )
+                    """
+                ),
+                {
+                    **payload,
+                    "importacion_id": importacion_id,
+                    "equipo_id": equipo_id,
+                    "departamento_id": departamento_id,
+                    "periodo": periodo,
+                    "source_row": _next_source_row(db, importacion_id),
+                    "raw_line": raw_line,
+                },
+            )
+
+    for importacion_id in sorted(touched_imports):
+        _refresh_program_count(db, importacion_id)
 
 
 def dashboard_simple(periodo: str, db=None) -> dict:

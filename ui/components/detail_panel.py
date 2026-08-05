@@ -38,7 +38,7 @@ class DetailPanel(QFrame):
         self._title.setWordWrap(True)
         header.addWidget(self._title, stretch=1)
 
-        close_btn = QPushButton("✕")
+        close_btn = QPushButton("X")
         close_btn.setObjectName("subtle")
         close_btn.setFixedWidth(32)
         close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -53,9 +53,12 @@ class DetailPanel(QFrame):
         outer.addLayout(self._badges_row)
 
         scroll = QScrollArea()
+        scroll.setObjectName("DetailPanelScroll")
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.viewport().setObjectName("DetailPanelViewport")
         self._content = QWidget()
+        self._content.setObjectName("DetailPanelContent")
         self._content_layout = QVBoxLayout(self._content)
         self._content_layout.setContentsMargins(0, SPACING["xs"], 0, 0)
         self._content_layout.setSpacing(SPACING["sm"])
@@ -97,6 +100,7 @@ class DetailPanel(QFrame):
     # ------------------------------------------------------------------
     def _field(self, label: str, value: str) -> QWidget:
         box = QWidget()
+        box.setObjectName("DetailField")
         v = QVBoxLayout(box)
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(1)

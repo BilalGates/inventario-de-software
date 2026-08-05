@@ -141,6 +141,7 @@ STATUS_LABELS = {
     "archivo": "neutral",
     "file": "neutral",
     "pendiente": "warning",
+    "importado": "success",
     "incompleto": "warning",
     "no autorizado": "danger",
     "no presente": "neutral",

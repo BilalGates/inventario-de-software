@@ -4,6 +4,7 @@ Siempre QTableView + QAbstractTableModel — nunca QTableWidget.
 """
 from __future__ import annotations
 
+import re
 from typing import Callable
 
 from PySide6.QtCore import QSortFilterProxyModel, Qt, Signal
@@ -21,6 +22,26 @@ from ui.components.base_table_model import BaseTableModel
 from ui.components.status_badge import BadgeDelegate
 from ui.components.ui_kit import EmptyState
 from ui.tokens import HEIGHT
+
+
+def _natural_key(value: object) -> list[tuple[int, object]]:
+    parts = re.split(r"(\d+)", str(value or "").casefold())
+    key: list[tuple[int, object]] = []
+    for part in parts:
+        if not part:
+            continue
+        if part.isdigit():
+            key.append((0, int(part)))
+        else:
+            key.append((1, part))
+    return key
+
+
+class NaturalSortProxyModel(QSortFilterProxyModel):
+    def lessThan(self, left, right) -> bool:
+        left_value = left.data(Qt.ItemDataRole.DisplayRole)
+        right_value = right.data(Qt.ItemDataRole.DisplayRole)
+        return _natural_key(left_value) < _natural_key(right_value)
 
 
 class SortableTable(QWidget):
@@ -51,10 +72,11 @@ class SortableTable(QWidget):
         self._headers = headers
         self._keys = keys or []
         self._badge_keys = badge_keys or []
+        self._context_menu_handler: Callable[[dict, object], bool | None] | None = None
         self._source_model = BaseTableModel([], headers, keys)
         self._empty_message = "No hay registros para mostrar"
 
-        self._proxy = QSortFilterProxyModel(self)
+        self._proxy = NaturalSortProxyModel(self)
         self._proxy.setSourceModel(self._source_model)
         self._proxy.setFilterCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
         self._proxy.setFilterKeyColumn(-1)
@@ -102,6 +124,9 @@ class SortableTable(QWidget):
 
     def view(self) -> QTableView:
         return self._view
+
+    def set_context_menu_handler(self, handler: Callable[[dict, object], bool | None] | None) -> None:
+        self._context_menu_handler = handler
 
     # ------------------------------------------------------------------
     # Datos
@@ -154,12 +179,18 @@ class SortableTable(QWidget):
         self.selection_changed.emit(self.selected_row())
 
     def _on_context_menu(self, pos) -> None:
+        proxy_index = self._view.indexAt(pos)
+        if proxy_index.isValid():
+            self._view.selectRow(proxy_index.row())
         row = self.selected_row()
         if not row:
             return
+        global_pos = self._view.viewport().mapToGlobal(pos)
+        if self._context_menu_handler and self._context_menu_handler(row, global_pos):
+            return
         menu = QMenu(self)
         copy_action = menu.addAction("Copiar nombre")
-        action = menu.exec(self._view.viewport().mapToGlobal(pos))
+        action = menu.exec(global_pos)
         if action == copy_action:
             from PySide6.QtWidgets import QApplication
             name = row.get("nombre") or row.get("name") or str(next(iter(row.values()), ""))

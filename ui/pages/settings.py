@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QDialog,
     QMessageBox,
     QPushButton,
     QVBoxLayout,
@@ -48,6 +49,11 @@ class SettingsPage(QWidget):
         layout.addWidget(self._build_database_group())
         layout.addWidget(self._build_about_group())
         layout.addStretch()
+
+    def close_dialog(self) -> None:
+        dialog = self.window()
+        if isinstance(dialog, QDialog):
+            dialog.accept()
 
     # ── Apariencia ─────────────────────────────────────────────────
     def _build_appearance_group(self) -> QGroupBox:
@@ -160,3 +166,28 @@ class SettingsPage(QWidget):
             QMessageBox.critical(self, "Error", f"No se pudo guardar .env:\n{exc}")
         finally:
             self._save_btn.setEnabled(True)
+
+
+class SettingsDialog(QDialog):
+    """Ventana emergente que aloja la página de configuración."""
+
+    def __init__(self, main_window: "MainWindow") -> None:
+        super().__init__(main_window)
+        self.setWindowTitle("Configuración")
+        self.setModal(True)
+        self.setMinimumWidth(560)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        self.page = SettingsPage(main_window)
+        layout.addWidget(self.page)
+
+        footer = QHBoxLayout()
+        footer.setContentsMargins(24, 0, 24, 20)
+        footer.addStretch()
+        close_btn = QPushButton("Cerrar")
+        close_btn.clicked.connect(self.accept)
+        footer.addWidget(close_btn)
+        layout.addLayout(footer)

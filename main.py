@@ -40,9 +40,7 @@ def _prewarm_imports() -> None:
 
         import modules.software              # noqa
         import modules.equipos               # noqa
-        import modules.importacion           # noqa
-        import modules.autorizado            # noqa
-        import modules.exportacion           # noqa
+        import modules.simple_inventory      # noqa
         import utils.normalizer              # noqa
         import utils.parser                  # noqa — importa pandas/openpyxl
     except Exception:

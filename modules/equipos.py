@@ -197,6 +197,28 @@ def existe_equipo(db, departamento_id: int, nombre: str) -> bool:
     return row is not None
 
 
+def _duplicate_equipo_id(
+    db,
+    departamento_id: int,
+    nombre: str,
+    exclude_equipo_id: int | None = None,
+) -> int | None:
+    nombre_norm = normalize_equipo_nombre(nombre)
+    sql = """
+        SELECT id
+        FROM equipos
+        WHERE departamento_id = :departamento_id
+          AND nombre_norm = :nombre_norm
+    """
+    params = {"departamento_id": departamento_id, "nombre_norm": nombre_norm}
+    if exclude_equipo_id is not None:
+        sql += " AND id <> :exclude_equipo_id"
+        params["exclude_equipo_id"] = exclude_equipo_id
+    sql += " LIMIT 1"
+    row = db.execute(text(sql), params).first()
+    return int(row[0]) if row else None
+
+
 def crear_equipo(
     db,
     departamento_id: int,
@@ -219,6 +241,57 @@ def crear_equipo(
             "notas": notas or None,
             "es_servidor": es_servidor,
         },
+    )
+    return int(result.lastrowid)
+
+
+def crear_equipo_detallado(db, data: dict) -> int:
+    nombre = str(data.get("nombre") or "").strip()
+    departamento_id = data.get("departamento_id")
+    if not nombre:
+        raise ValueError("El nombre del equipo es obligatorio.")
+    if departamento_id is None:
+        raise ValueError("El departamento es obligatorio.")
+    departamento_id = int(departamento_id)
+    if _duplicate_equipo_id(db, departamento_id, nombre):
+        raise ValueError("Ya existe un equipo con ese nombre en el departamento.")
+
+    nombre_norm = normalize_equipo_nombre(nombre)
+    fields = [
+        "departamento_id",
+        "nombre",
+        "nombre_norm",
+        "notas",
+        "activo",
+        "es_servidor",
+        "tipo_dispositivo",
+        "marca_modelo",
+        "num_serie",
+        "mac_address",
+        "sistema_operativo",
+        "procesador",
+        "ram",
+        "almacenamiento",
+        "responsable",
+        "ubicacion",
+        "coste",
+        "fecha_adquisicion",
+    ]
+    values = {
+        **{field: data.get(field) or None for field in fields},
+        "departamento_id": departamento_id,
+        "nombre": nombre,
+        "nombre_norm": nombre_norm,
+        "activo": bool(data.get("activo", True)),
+        "es_servidor": bool(data.get("es_servidor", False)),
+    }
+    if values.get("coste") is not None:
+        values["coste"] = _parse_cost(values["coste"])
+    columns = ", ".join(fields)
+    placeholders = ", ".join(f":{field}" for field in fields)
+    result = db.execute(
+        text(f"INSERT INTO equipos ({columns}) VALUES ({placeholders})"),
+        values,
     )
     return int(result.lastrowid)
 
@@ -283,6 +356,91 @@ def dar_baja_equipo(db, equipo_id: int) -> None:
     )
 
 
+def reactivar_equipo(db, equipo_id: int) -> None:
+    db.execute(
+        text(
+            """
+            UPDATE equipos
+            SET activo = TRUE, fecha_baja = NULL
+            WHERE id = :equipo_id
+            """
+        ),
+        {"equipo_id": equipo_id},
+    )
+
+
+def _table_column_exists(db, table_name: str, column_name: str) -> bool:
+    return bool(
+        db.execute(
+            text(
+                """
+                SELECT COUNT(*)
+                FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME = :table_name
+                  AND COLUMN_NAME = :column_name
+                """
+            ),
+            {"table_name": table_name, "column_name": column_name},
+        ).scalar()
+    )
+
+
+def _delete_from_optional_table(db, table_name: str, column_name: str, value: int) -> None:
+    safe_tables = {"v3_installed_programs", "v3_import_batches"}
+    safe_columns = {"equipo_id", "batch_id", "import_batch_id", "import_id"}
+    if table_name not in safe_tables or column_name not in safe_columns:
+        raise ValueError("Tabla opcional no permitida.")
+    if _table_column_exists(db, table_name, column_name):
+        db.execute(
+            text(f"DELETE FROM `{table_name}` WHERE `{column_name}` = :value"),
+            {"value": value},
+        )
+
+
+def _delete_v3_installed_programs(db, equipo_id: int) -> None:
+    if _table_column_exists(db, "v3_installed_programs", "equipo_id"):
+        _delete_from_optional_table(db, "v3_installed_programs", "equipo_id", equipo_id)
+        return
+    if not _table_column_exists(db, "v3_import_batches", "equipo_id"):
+        return
+    for batch_column in ("batch_id", "import_batch_id", "import_id"):
+        if _table_column_exists(db, "v3_installed_programs", batch_column):
+            db.execute(
+                text(
+                    f"""
+                    DELETE child
+                    FROM `v3_installed_programs` child
+                    JOIN `v3_import_batches` batch ON batch.id = child.`{batch_column}`
+                    WHERE batch.equipo_id = :equipo_id
+                    """
+                ),
+                {"equipo_id": equipo_id},
+            )
+            return
+
+
+def eliminar_equipo_definitivo(db, equipo_id: int) -> None:
+    equipo = obtener_equipo(db, equipo_id)
+    if not equipo:
+        raise ValueError("Equipo no encontrado.")
+    if equipo.get("activo"):
+        raise ValueError("Primero da de baja el equipo antes de eliminarlo definitivamente.")
+
+    _delete_v3_installed_programs(db, equipo_id)
+    _delete_from_optional_table(db, "v3_import_batches", "equipo_id", equipo_id)
+    for sql in (
+        "DELETE FROM software_instalado WHERE equipo_id = :equipo_id",
+        "DELETE FROM software_importaciones WHERE equipo_id = :equipo_id",
+        "DELETE FROM software_reactivacion_pendiente WHERE equipo_id = :equipo_id",
+        "DELETE FROM software_autorizado WHERE equipo_id = :equipo_id",
+        "DELETE FROM software_equipo WHERE equipo_id = :equipo_id",
+        "DELETE FROM importaciones WHERE equipo_id = :equipo_id",
+        "DELETE FROM equipos WHERE id = :equipo_id",
+    ):
+        db.execute(text(sql), {"equipo_id": equipo_id})
+
+
 def actualizar_usuario_dispositivo(db, equipo_id: int, usuario: str | None) -> None:
     db.execute(
         text(
@@ -338,6 +496,61 @@ def _build_update_sql(equipo_id: int, data: dict) -> tuple[str, dict]:
         return "", params
     sql = f"UPDATE equipos SET {', '.join(sets)} WHERE id = :equipo_id"
     return sql, params
+
+
+def actualizar_equipo(db, equipo_id: int, data: dict) -> None:
+    actual = obtener_equipo(db, equipo_id)
+    if not actual:
+        raise ValueError("Equipo no encontrado.")
+
+    nombre = str(data.get("nombre") or actual.get("nombre") or "").strip()
+    departamento_id = int(data.get("departamento_id") or actual.get("departamento_id"))
+    if not nombre:
+        raise ValueError("El nombre del equipo es obligatorio.")
+    if _duplicate_equipo_id(db, departamento_id, nombre, exclude_equipo_id=equipo_id):
+        raise ValueError("Ya existe un equipo con ese nombre en el departamento.")
+
+    update_data = dict(data)
+    update_data["departamento_id"] = departamento_id
+    update_data["nombre"] = nombre
+    update_data["nombre_norm"] = normalize_equipo_nombre(nombre)
+    assignments = []
+    params = {"equipo_id": equipo_id}
+
+    direct_fields = [
+        "departamento_id",
+        "nombre",
+        "nombre_norm",
+        *EQUIPO_UPDATE_FIELDS,
+    ]
+    for field in direct_fields:
+        if field in update_data:
+            assignments.append(f"{field} = :{field}")
+            params[field] = update_data.get(field) or None
+
+    if "activo" in update_data:
+        active = bool(update_data["activo"])
+        assignments.append("activo = :activo")
+        assignments.append("fecha_baja = :fecha_baja")
+        params["activo"] = active
+        params["fecha_baja"] = None if active else date.today()
+    if "es_servidor" in update_data:
+        assignments.append("es_servidor = :es_servidor")
+        params["es_servidor"] = bool(update_data["es_servidor"])
+    if update_data.get("coste") is not None:
+        coste = _parse_cost(update_data["coste"])
+        if coste is not None:
+            assignments.append("coste = :coste")
+            params["coste"] = coste
+    if update_data.get("fecha_adquisicion") is not None:
+        assignments.append("fecha_adquisicion = :fecha_adquisicion")
+        params["fecha_adquisicion"] = update_data["fecha_adquisicion"]
+
+    if assignments:
+        db.execute(
+            text(f"UPDATE equipos SET {', '.join(assignments)} WHERE id = :equipo_id"),
+            params,
+        )
 
 
 def importar_equipos_desde_lista(

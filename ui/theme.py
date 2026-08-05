@@ -81,49 +81,31 @@ QToolTip {{
     padding: {s['xs']}px {s['sm']}px;
 }}
 
-/* ====================== Sidebar ====================== */
-#Sidebar {{
+/* ====================== Busqueda global ====================== */
+QFrame#GlobalSearchBar {{
     background-color: {c['bg_secondary']};
-    border-right: 1px solid {c['border']};
+    border: none;
+    border-bottom: 1px solid {c['border']};
+    border-radius: 0;
 }}
 
-#SidebarTitle {{
-    color: {c['text_primary']};
-    font-size: {f['section']}px;
-    font-weight: 600;
-}}
-
-#SidebarVersion {{
-    color: {c['text_muted']};
-    font-size: {f['tiny']}px;
-}}
-
-#SidebarGroup {{
+QLabel#GlobalSearchLabel {{
     color: {c['text_muted']};
     font-size: {f['tiny']}px;
     font-weight: 700;
-    padding: {s['md']}px {s['sm']}px {s['xs']}px {s['sm']}px;
 }}
 
-QPushButton#navBtn {{
-    background: transparent;
-    color: {c['text_secondary']};
-    border: none;
-    border-radius: {r['sm']}px;
-    padding: 0 {s['sm']}px;
-    text-align: left;
-    font-size: {f['body']}px;
-}}
-
-QPushButton#navBtn:hover {{
-    background: {c['bg_hover']};
+QLabel#GlobalBrand {{
     color: {c['text_primary']};
+    font-size: {f['section']}px;
+    font-weight: 700;
+    padding-right: {s['md']}px;
 }}
 
-QPushButton#navBtn[active="true"] {{
-    background: {c['accent_soft']};
-    color: {c['accent']};
-    font-weight: 600;
+QComboBox#GlobalPeriodCombo {{
+    min-width: 54px;
+    padding-left: {s['sm']}px;
+    padding-right: {s['sm']}px;
 }}
 
 /* ====================== Cabecera de página ====================== */
@@ -139,14 +121,26 @@ QPushButton#navBtn[active="true"] {{
 }}
 
 /* ====================== Tarjetas / superficies ====================== */
-#Toolbar, #FilterBar, #FeedbackBar, #EmptyState, QFrame#MetricCard, QFrame#SectionCard, #DetailPanel {{
+#Toolbar, #FilterBar, #FeedbackBar, #EmptyState, QFrame#SectionCard, #DetailPanel {{
     background-color: {c['bg_secondary']};
     border: 1px solid {c['border']};
     border-radius: {r['md']}px;
 }}
 
-QFrame#MetricCard[accent="true"] {{
-    border-left: 3px solid {c['accent']};
+QFrame#DetailPanel {{
+    background-color: {c['bg_secondary']};
+    border: none;
+    border-left: 1px solid {c['border']};
+    border-radius: 0;
+}}
+
+QScrollArea#DetailPanelScroll,
+QWidget#DetailPanelViewport,
+QWidget#DetailPanelContent,
+QWidget#DetailField,
+QWidget#InventoryTab {{
+    background-color: {c['bg_secondary']};
+    border: none;
 }}
 
 #SectionTitle {{
@@ -155,21 +149,37 @@ QFrame#MetricCard[accent="true"] {{
     font-weight: 600;
 }}
 
-QLabel#MetricTitle {{
-    color: {c['text_secondary']};
-    font-size: {f['tiny']}px;
-    font-weight: 700;
+QFrame#DepartmentCard {{
+    background-color: {c['bg_secondary']};
+    border: 1px solid {c['border']};
+    border-radius: {r['md']}px;
 }}
 
-QLabel#MetricValue {{
+QFrame#DepartmentCard:hover {{
+    background-color: {c['bg_hover']};
+    border-color: {c['border_strong']};
+}}
+
+QFrame#DepartmentCard[selected="true"] {{
+    background-color: {c['accent_soft']};
+    border: 1px solid {c['accent']};
+}}
+
+QLabel#DepartmentCardTitle {{
     color: {c['text_primary']};
-    font-size: {f['metric']}px;
+    font-size: {f['section']}px;
     font-weight: 700;
 }}
 
-QLabel#MetricSubtitle {{
-    color: {c['text_muted']};
-    font-size: {f['tiny']}px;
+QLabel#DepartmentCardMetric {{
+    color: {c['text_primary']};
+    font-size: {f['body']}px;
+    font-weight: 600;
+}}
+
+QLabel#DepartmentCardMeta {{
+    color: {c['text_secondary']};
+    font-size: {f['small']}px;
 }}
 
 /* ====================== FeedbackBar (estados) ====================== */
@@ -195,6 +205,12 @@ QTableView {{
     selection-color: {c['text_primary']};
     alternate-background-color: {c['bg_primary']};
     outline: none;
+}}
+
+QTableView#InventoryTable {{
+    border: none;
+    border-right: 1px solid {c['border']};
+    border-radius: 0;
 }}
 
 QTableView::item {{
@@ -331,17 +347,23 @@ QGroupBox::title {{
 }}
 
 /* ====================== Tabs ====================== */
-QTabWidget::pane {{ background-color: {c['bg_primary']}; border: none; }}
+QTabWidget::pane {{ background-color: {c['bg_secondary']}; border: none; }}
+QTabBar {{ background-color: {c['bg_secondary']}; }}
 QTabBar::tab {{
-    background-color: transparent;
+    background-color: {c['bg_secondary']};
     color: {c['text_secondary']};
     border: none;
     border-bottom: 2px solid transparent;
     padding: {s['sm']}px {s['md']}px;
     margin-right: {s['xs']}px;
 }}
-QTabBar::tab:selected {{ color: {c['accent']}; border-bottom-color: {c['accent']}; font-weight: 600; }}
-QTabBar::tab:hover {{ color: {c['text_primary']}; }}
+QTabBar::tab:selected {{
+    background-color: {c['bg_secondary']};
+    color: {c['accent']};
+    border-bottom-color: {c['accent']};
+    font-weight: 600;
+}}
+QTabBar::tab:hover {{ background-color: {c['bg_secondary']}; color: {c['text_primary']}; }}
 
 /* ====================== Scrollbars ====================== */
 QScrollBar:vertical {{ background: transparent; width: 10px; margin: 0; }}
