@@ -95,13 +95,6 @@ QLabel#GlobalSearchLabel {{
     font-weight: 700;
 }}
 
-QLabel#GlobalBrand {{
-    color: {c['text_primary']};
-    font-size: {f['section']}px;
-    font-weight: 700;
-    padding-right: {s['md']}px;
-}}
-
 QComboBox#GlobalPeriodCombo {{
     min-width: 54px;
     padding-left: {s['sm']}px;

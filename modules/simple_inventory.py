@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from hashlib import sha256
-from datetime import date
+from datetime import date, datetime
 from io import BytesIO
 from typing import Any
 
@@ -33,6 +33,42 @@ def _engine():
     from database.connection import get_engine
 
     return get_engine()
+
+
+def ultima_importacion_equipo(equipo_id: int, db=None) -> dict | None:
+    """
+    Devuelve la ultima importacion confirmada de un equipo, o None.
+
+    Se usa para avisar antes de volver a cargar datos en un equipo que ya
+    los tiene, y asi detectar el error de pegar el listado de un ordenador
+    en la ficha de otro. Incluye `horas_desde` (float) para decidir si el
+    aviso procede.
+    """
+    if db is None:
+        with _engine().connect() as conn:
+            return ultima_importacion_equipo(equipo_id, db=conn)
+
+    row = db.execute(
+        text(
+            """
+            SELECT
+                imp.id,
+                imp.periodo,
+                imp.fecha_importacion,
+                imp.n_programas,
+                e.nombre AS equipo_nombre,
+                TIMESTAMPDIFF(SECOND, imp.fecha_importacion, NOW()) / 3600 AS horas_desde
+            FROM software_importaciones imp
+            JOIN equipos e ON e.id = imp.equipo_id
+            WHERE imp.equipo_id = :equipo_id
+              AND imp.estado = 'confirmed'
+            ORDER BY imp.fecha_importacion DESC, imp.id DESC
+            LIMIT 1
+            """
+        ),
+        {"equipo_id": equipo_id},
+    ).mappings().first()
+    return dict(row) if row else None
 
 
 def confirm_software_import(equipo_id: int, periodo: str, rows: list[dict], raw_text: str, db=None) -> int:
@@ -631,6 +667,12 @@ def resumen_departamentos(periodo: str, db=None) -> list[dict]:
 def _cell_value(value: Any):
     if isinstance(value, bool):
         return "Si" if value else "No"
+    # openpyxl escribe datetime/date nativos; los pasamos a texto en
+    # formato local para que la hoja se lea igual en cualquier Excel.
+    if isinstance(value, datetime):
+        return value.strftime("%d/%m/%Y %H:%M")
+    if isinstance(value, date):
+        return value.strftime("%d/%m/%Y")
     return value
 
 
@@ -668,8 +710,42 @@ def exportar_inventario_excel(periodo: str, db=None) -> bytes:
     ws_eq = wb.create_sheet("Equipos")
     _write_rows(
         ws_eq,
-        ["Departamento", "Equipo", "Usuario", "Activo"],
-        [[e.get("departamento_nombre"), e.get("nombre"), e.get("notas"), _cell_value(e.get("activo"))] for e in equipos],
+        [
+            "Departamento", "Equipo", "Usuario", "Activo", "Servidor",
+            "Tipo", "Marca/Modelo", "N serie", "MAC",
+            "Sistema operativo", "Procesador", "RAM", "Almacenamiento",
+            "Responsable", "Ubicacion", "Coste", "Fecha adquisicion",
+            "Fecha alta", "Fecha baja",
+            "Programas", "Ultima importacion",
+        ],
+        [
+            [
+                e.get("departamento_nombre"),
+                e.get("nombre"),
+                e.get("notas"),
+                # MySQL devuelve los BOOLEAN como 0/1: forzamos bool para
+                # que la hoja muestre "Si"/"No" y no un numero.
+                _cell_value(bool(e.get("activo"))),
+                _cell_value(bool(e.get("es_servidor"))),
+                e.get("tipo_dispositivo"),
+                e.get("marca_modelo"),
+                e.get("num_serie"),
+                e.get("mac_address"),
+                e.get("sistema_operativo"),
+                e.get("procesador"),
+                e.get("ram"),
+                e.get("almacenamiento"),
+                e.get("responsable"),
+                e.get("ubicacion"),
+                e.get("coste"),
+                _cell_value(e.get("fecha_adquisicion")),
+                _cell_value(e.get("fecha_alta")),
+                _cell_value(e.get("fecha_baja")),
+                e.get("total_software_activo"),
+                _cell_value(e.get("ultima_importacion")),
+            ]
+            for e in equipos
+        ],
     )
 
     for dept in listar_departamentos(db):

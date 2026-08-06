@@ -35,6 +35,11 @@ ERROR_KEYS = ["line_number", "message", "raw"]
 VALIDATE_LABEL = "Validar"
 CREATE_LABEL = "Crear importacion"
 
+# Si el equipo ya tuvo una importacion hace este tiempo o mas, avisamos
+# antes de sobrescribir: suele indicar que el listado pegado es de otro
+# ordenador.
+RECENT_IMPORT_HOURS = 24
+
 
 class ImportErrorsDialog(QDialog):
     """Ventana emergente con los errores de formato del pegado."""
@@ -99,6 +104,12 @@ def _save_import(equipo_id: int, periodo: str, rows: list[dict], raw_text: str) 
     return confirm_software_import(equipo_id, periodo, rows, raw_text)
 
 
+def _fetch_last_import(equipo_id: int):
+    from modules.simple_inventory import ultima_importacion_equipo
+
+    return ultima_importacion_equipo(equipo_id)
+
+
 class ImportPandaPage(QWidget):
     import_saved = Signal(int)
 
@@ -108,6 +119,7 @@ class ImportPandaPage(QWidget):
         self._embedded = embedded
         self._thread = None
         self._parse_result: PandaParseResult | None = None
+        self._pending_save: tuple[int, str] | None = None
         self._department_id: int | None = None
         self._pending_department_id: int | None = None
         self._pending_equipo_id: int | None = None
@@ -147,6 +159,11 @@ class ImportPandaPage(QWidget):
         paste_card.add_layout(equipo_row)
 
         self._paste_area = QTextEdit()
+        # Sin esto, un pegado con formato (navegador, consola de Panda) entra
+        # como HTML: cada celda pasa a ser una linea y los tabuladores que
+        # separan las columnas se pierden.
+        self._paste_area.setAcceptRichText(False)
+        self._paste_area.setTabChangesFocus(False)
         self._paste_area.setPlaceholderText(
             "Pega el listado de Panda. Sirve tabulado o vertical: nombre, editor, fecha, tamano, version."
         )
@@ -279,6 +296,57 @@ class ImportPandaPage(QWidget):
         except ValueError as exc:
             self._feedback.show_message(str(exc), "warning")
             return
+        # Antes de guardar, comprobamos si el equipo ya tiene datos: es el
+        # aviso que evita cargar el listado de un ordenador en otro.
+        self._action_btn.setEnabled(False)
+        self._pending_save = (int(equipo_id), periodo)
+        self._feedback.show_message("Comprobando importaciones previas...", "info")
+        self._thread = run_in_thread(
+            self,
+            _fetch_last_import,
+            int(equipo_id),
+            on_done=self._on_last_import_checked,
+            on_error=self._on_error,
+        )
+
+    def _on_last_import_checked(self, previa) -> None:
+        if not self._pending_save:
+            return
+        equipo_id, periodo = self._pending_save
+
+        if previa and float(previa.get("horas_desde") or 0) >= RECENT_IMPORT_HOURS:
+            if not self._ask_overwrite(previa):
+                self._pending_save = None
+                self._feedback.show_message("Importacion cancelada.", "warning")
+                self._update_confirm_state()
+                return
+
+        self._start_save(equipo_id, periodo)
+
+    def _ask_overwrite(self, previa: dict) -> bool:
+        """Pide confirmacion cuando el equipo ya tiene datos cargados."""
+        fecha = previa.get("fecha_importacion")
+        fecha_str = fecha.strftime("%d/%m/%Y %H:%M") if hasattr(fecha, "strftime") else str(fecha or "?")
+        equipo = previa.get("equipo_nombre") or "este equipo"
+        n_programas = previa.get("n_programas") or 0
+
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle("El equipo ya tiene datos")
+        box.setText(f"<b>{equipo}</b> ya tiene software importado.")
+        box.setInformativeText(
+            f"Ultima importacion: {fecha_str} ({n_programas} programas, periodo {previa.get('periodo') or '?'}).\n\n"
+            "Comprueba que el listado pegado es de este ordenador y no de otro.\n"
+            "Si continuas, la importacion anterior de ese periodo se reemplazara."
+        )
+        continuar = box.addButton("Continuar", QMessageBox.ButtonRole.DestructiveRole)
+        box.addButton("Cancelar", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(continuar)
+        box.exec()
+        return box.clickedButton() is continuar
+
+    def _start_save(self, equipo_id: int, periodo: str) -> None:
+        self._pending_save = None
         self._action_btn.setEnabled(False)
         self._feedback.show_message("Guardando importacion...", "info")
         self._thread = run_in_thread(
@@ -286,7 +354,7 @@ class ImportPandaPage(QWidget):
             _save_import,
             int(equipo_id),
             periodo,
-            result.rows,
+            self._parse_result.rows,
             self._paste_area.toPlainText(),
             on_done=self._on_saved,
             on_error=self._on_error,
@@ -305,6 +373,7 @@ class ImportPandaPage(QWidget):
         self.import_saved.emit(importacion_id)
 
     def _on_error(self, msg: str) -> None:
+        self._pending_save = None
         self._update_confirm_state()
         QMessageBox.critical(self, "Error", msg)
         self._feedback.show_message(f"Error: {msg}", "error")

@@ -154,6 +154,7 @@ DEPT_CODE_MAP = {
 
 RESOURCES_DIR = BASE_DIR / "resources"
 ICONS_DIR = RESOURCES_DIR / "icons"
+APP_ICON = ICONS_DIR / "app.ico"
 HARDWARE_CSV = RESOURCES_DIR / "Inventario_Equipos_Asserta.csv"
 SOFTWARE_EXCEL = RESOURCES_DIR / "Inventario_Software_ENS_Por_Departamento.xlsx"
 SOFTWARE_VBS = RESOURCES_DIR / "Inventario_Software.vbs"

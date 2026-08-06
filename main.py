@@ -13,6 +13,23 @@ os.environ.setdefault("PYDEVD_DISABLE_FILE_VALIDATION", "1")
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 
+def _set_windows_app_id() -> None:
+    """
+    Registra un AppUserModelID propio en Windows.
+
+    Sin esto, la barra de tareas agrupa la ventana bajo el icono del
+    interprete de Python y no muestra el icono de la aplicacion.
+    """
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Asserta.InventarioAsserta.2")
+    except Exception:
+        pass  # Cosmetico: si falla, la app arranca igual
+
+
 def _prewarm_imports() -> None:
     """
     Pre-importa módulos pesados ANTES de que Qt empiece.
@@ -55,6 +72,8 @@ def main() -> None:
     parser.add_argument("--import-historical", action="store_true", help="Importa Excel/CSV históricos.")
     parser.add_argument("--force-import", action="store_true", help="Fuerza la importación histórica.")
     args = parser.parse_args()
+
+    _set_windows_app_id()
 
     # Pre-importar módulos pesados ANTES de arrancar Qt para evitar import lock
     # contention en los worker threads

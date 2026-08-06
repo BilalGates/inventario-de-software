@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any
@@ -95,6 +96,110 @@ def _parse_tabbed(lines: list[tuple[int, str]]) -> tuple[list[dict], list[ParseI
     return rows, errors
 
 
+_DATE_RE = re.compile(r"^\d{1,2}[/-]\d{1,2}[/-]\d{4}$")
+_SIZE_RE = re.compile(r"^\d[\d.,]*\s*(KB|MB|GB|TB)$", re.IGNORECASE)
+_VERSION_RE = re.compile(r"^\d+(\.\d+)+.*$")
+# Algunos drivers traen la version como "11/14/2019 1.0.2.9": fecha,
+# espacio y numero de version.
+_DATED_VERSION_RE = re.compile(r"^\d{1,2}[/-]\d{1,2}[/-]\d{4}\s+\d+(\.\d+)+.*$")
+
+
+_NOISE_TOKENS = {"-", "–", "—", "|", "·", ""}
+
+
+def _is_date_token(val: str) -> bool:
+    return bool(_DATE_RE.match(val.strip()))
+
+
+def _is_noise_token(val: str) -> bool:
+    """Separadores y celdas vacias que deja un pegado con formato."""
+    return val.strip() in _NOISE_TOKENS
+
+
+def _is_size_token(val: str) -> bool:
+    val = val.strip()
+    return val in ("-", "–") or bool(_SIZE_RE.match(val))
+
+
+def _is_version_token(val: str) -> bool:
+    val = val.strip()
+    return val in ("-", "–") or bool(_VERSION_RE.match(val)) or bool(_DATED_VERSION_RE.match(val))
+
+
+def _parse_loose(lines: list[tuple[int, str]]) -> tuple[list[dict], list[ParseIssue]]:
+    """
+    Reconstruye filas de un pegado que perdio los tabuladores y en el que
+    algunos campos (tamano, version) pueden faltar por completo.
+
+    En vez de exigir bloques de FIELD_COUNT lineas, usa la fecha de
+    instalacion como ancla: nombre y editor son lo que hay antes de la
+    fecha, y tamano/version lo que hay despues (cada uno opcional, se
+    reconoce por su forma).
+    """
+    values = [(n, raw.strip()) for n, raw in lines if raw.strip()]
+    if values and _is_header([v for _, v in values[:FIELD_COUNT]]):
+        values = values[FIELD_COUNT:]
+
+    # Solo anclamos en fechas que ocupan la linea entera. Una fecha dentro
+    # de otro texto (p.ej. la version "11/14/2019 1.0.2.9" de los Windows
+    # Driver Package) no separa filas.
+    date_positions = [i for i, (_, val) in enumerate(values) if _is_date_token(val)]
+    if not date_positions:
+        return [], [ParseIssue(values[0][0] if values else 0, "No se detectaron fechas de instalacion para separar las filas.", "")]
+
+    rows: list[dict] = []
+    errors: list[ParseIssue] = []
+    start = 0
+    for idx, date_pos in enumerate(date_positions):
+        next_date = date_positions[idx + 1] if idx + 1 < len(date_positions) else len(values)
+        # Los separadores ("-", "|", celdas vacias) que deja un pegado con
+        # formato no forman parte ni del nombre ni del editor.
+        head = [(n, v) for n, v in values[start:date_pos] if not _is_noise_token(v)]
+        tail = values[date_pos + 1 : next_date]
+
+        if not head:
+            errors.append(
+                ParseIssue(
+                    values[date_pos][0],
+                    "Falta el nombre o el editor antes de la fecha de instalacion.",
+                    " | ".join(v for _, v in values[start:date_pos]) or values[date_pos][1],
+                )
+            )
+            start = next_date
+            continue
+
+        # El editor es la ultima linea antes de la fecha; el nombre puede
+        # haberse partido en varias lineas y se vuelve a unir. Si solo hay
+        # una linea, es el nombre y el editor queda desconocido.
+        if len(head) == 1:
+            nombre = head[0][1]
+            editor = ""
+        else:
+            nombre = " ".join(v for _, v in head[:-1])
+            editor = head[-1][1]
+
+        # tail lleva, en orden, un tamano opcional y una version opcional.
+        tamano = ""
+        version = ""
+        rest = [v for _, v in tail]
+        if rest and _is_size_token(rest[0]):
+            tamano = rest.pop(0)
+        if rest and _is_version_token(rest[0]):
+            version = rest.pop(0)
+        if rest:
+            # Sobra texto que no encaja: el siguiente nombre empezo aqui.
+            # Lo devolvemos al inicio de la fila siguiente.
+            next_date = next_date - len(rest)
+
+        raw_values = [nombre, editor, values[date_pos][1], tamano, version]
+        item = _row_to_program(raw_values, head[0][0], "\t".join(raw_values))
+        if item:
+            rows.append(item)
+        start = next_date
+
+    return rows, errors
+
+
 def _parse_vertical(lines: list[tuple[int, str]]) -> tuple[list[dict], list[ParseIssue]]:
     rows: list[dict] = []
     errors: list[ParseIssue] = []
@@ -127,11 +232,21 @@ def parse_panda_text(text: str | None) -> PandaParseResult:
     if not lines:
         return PandaParseResult([], [ParseIssue(0, "No se detectaron programas.", "")], raw_hash, "empty")
 
-    mode = "tabbed" if any("\t" in line for _, line in lines) else "vertical"
-    if mode == "tabbed":
+    if any("\t" in line for _, line in lines):
+        mode = "tabbed"
         rows, errors = _parse_tabbed(lines)
-    else:
+    elif len([1 for _, line in lines if line.strip()]) % FIELD_COUNT == 0:
+        mode = "vertical"
         rows, errors = _parse_vertical(lines)
+        if errors:
+            # Cuadraba el multiplo por casualidad pero los bloques no eran
+            # coherentes: reintentamos anclando por fecha.
+            loose_rows, loose_errors = _parse_loose(lines)
+            if loose_rows and len(loose_errors) < len(errors):
+                mode, rows, errors = "loose", loose_rows, loose_errors
+    else:
+        mode = "loose"
+        rows, errors = _parse_loose(lines)
 
     if not rows and not errors:
         errors.append(ParseIssue(0, "No se detectaron filas validas.", ""))

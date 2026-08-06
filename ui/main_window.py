@@ -106,10 +106,6 @@ class MainWindow(QMainWindow):
         self._settings_btn.clicked.connect(self._open_settings)
         self._search_bar.add_widget(self._settings_btn)
 
-        brand = QLabel("Inventario Asserta")
-        brand.setObjectName("GlobalBrand")
-        self._search_bar.add_widget(brand)
-
         self._global_search = QLineEdit()
         self._global_search.setPlaceholderText("Buscar")
         self._global_search.setClearButtonEnabled(True)
