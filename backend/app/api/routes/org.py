@@ -151,8 +151,9 @@ def department_detail(dept_id: int, db: Session = Depends(get_db), _: CurrentUse
         .group_by(SoftwareProduct.id, SoftwareProduct.name, SoftwareProduct.authorization_status)
         .order_by(func.count(func.distinct(SoftwareInstallation.device_id)).desc()).limit(200)
     ).all()
-    moves = db.execute(select(DeviceAssignment).where(DeviceAssignment.department_id == dept_id)
-                       .order_by(DeviceAssignment.started_at.desc()).limit(50)).scalars().all()
+    moves = db.execute(select(DeviceAssignment, Device).join(Device, Device.id == DeviceAssignment.device_id)
+                       .where(DeviceAssignment.department_id == dept_id)
+                       .order_by(DeviceAssignment.started_at.desc()).limit(50)).all()
     history = db.execute(select(AuditEvent).where(AuditEvent.entity_type == "department",
                                                   AuditEvent.entity_id == str(dept_id))
                          .order_by(AuditEvent.id.desc()).limit(50)).scalars().all()
@@ -161,8 +162,8 @@ def department_detail(dept_id: int, db: Session = Depends(get_db), _: CurrentUse
         "users": [{"id": u.id, "upn": u.upn, "display_name": u.display_name} for u in users],
         "software": [{"product_id": r.id, "name": r.name, "authorization_status": r.authorization_status,
                       "devices": r.n} for r in top],
-        "movements": [{"device_id": m.device_id, "device": m.device_id, "started_at": m.started_at,
-                       "ended_at": m.ended_at, "reason": m.reason, "actor": m.actor} for m in moves],
+        "movements": [{"device_id": m.device_id, "device": dev.display_name, "started_at": m.started_at,
+                       "ended_at": m.ended_at, "reason": m.reason, "actor": m.actor} for m, dev in moves],
         "history": [{"action": e.action, "actor": e.actor, "summary": e.summary, "at": e.occurred_at,
                      "before": e.before, "after": e.after} for e in history],
     }

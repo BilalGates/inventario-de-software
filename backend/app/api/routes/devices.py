@@ -192,7 +192,8 @@ def create_device(body: DeviceIn, db: Session = Depends(get_db), user: CurrentUs
     dept_id = data.pop("department_id", None)
     upn = data.pop("primary_user_upn", None)
     now = utcnow()
-    device = Device(**data, status=data.get("status") or "active", first_seen_at=now,
+    data["status"] = data.get("status") or "active"
+    device = Device(**data, first_seen_at=now,
                     field_sources={k: {"source": "manual", "at": now.isoformat(timespec="seconds")} for k in data})
     device.hostname_key = hostname_key(device.hostname)
     db.add(device)

@@ -136,8 +136,10 @@ def list_sources(db: Session = Depends(get_db), _: CurrentUser = Reader):
     for src in db.execute(select(InventorySource).order_by(InventorySource.priority)).scalars():
         last = db.execute(select(InventoryRun).where(InventoryRun.source_id == src.id)
                           .order_by(InventoryRun.id.desc()).limit(1)).scalar_one_or_none()
-        devices = db.execute(select(func.count(func.distinct(DeviceExternalId.device_id)))
-                             .where(DeviceExternalId.source == src.code)).scalar() or 0
+        # Fuentes sin identificadores oficiales (Panda) solo se reflejan a través de su software.
+        devices = len(set(db.execute(select(DeviceExternalId.device_id).where(DeviceExternalId.source == src.code)).scalars())
+                      | set(db.execute(select(SoftwareInstallation.device_id)
+                                       .where(SoftwareInstallation.source == src.code)).scalars()))
         devices_sw = db.execute(select(func.count(func.distinct(SoftwareInstallation.device_id)))
                                 .where(SoftwareInstallation.source == src.code,
                                        SoftwareInstallation.present.is_(True))).scalar() or 0

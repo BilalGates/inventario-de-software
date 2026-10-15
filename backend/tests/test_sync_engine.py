@@ -214,3 +214,20 @@ def test_truncated_panda_paste_does_not_remove_software(db):
     assert done.status == "succeeded"
     assert count(db, SoftwareInstallation, SoftwareInstallation.present.is_(False)) == 0
     assert db.execute(select(Alert).where(Alert.dedup_key.like("device_drop:%"))).scalar_one()
+
+
+def test_intune_apps_csv_declared_complete_infers_removals_per_device(db):
+    def apps(rows):
+        return "DeviceId,DeviceName,AppName,Publisher,Version\n" + "".join(f"d1,PC-1,{r},Pub,1.0\n" for r in rows)
+
+    for content in (apps(["A", "B", "C"]), apps(["A", "B"])):
+        run = runs.enqueue(db, "intune", "upload", "t", {"content": content, "filename": "apps.csv",
+                                                         "declared_complete": True})
+        db.commit()
+        done = runs.execute_run(db, run)
+    assert done.status == "succeeded" and done.is_complete is False  # un CSV no cubre todo el parque
+    assert done.stats["software_removed"] == 1
+    # sin declarar completo, no se infiere nada
+    run = runs.enqueue(db, "intune", "upload", "t", {"content": apps(["A"]), "filename": "apps.csv"})
+    db.commit()
+    assert runs.execute_run(db, run).stats["software_removed"] == 0

@@ -266,3 +266,8 @@ def test_queue_status_visible(client, db):
     assert db.execute(select(InventoryRun.status)).scalar_one() == "succeeded"
     # Panda sin dispositivo previo: crea la ficha por hostname
     assert client.get("/api/devices", params={"q": "PC-55"}).json()["total"] == 1
+
+
+def test_create_device_with_explicit_status(client):
+    r = client.post("/api/devices", json={"hostname": "PC-STOCK", "status": "in_stock"})
+    assert r.status_code == 201 and r.json()["status"] == "in_stock"

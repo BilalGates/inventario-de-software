@@ -76,16 +76,18 @@ class SyncEngine:
             self._validate(result)
             stats = self.process(run, source, result, log)
             run.stats = {**(run.stats or {}), **result.stats, **stats}
+            # is_complete: extracción íntegra de todo el parque (solo así cuenta para el inventario mensual).
+            # partial: hubo errores o una caída anómala; los datos recibidos se aplican, pero sin bajas.
             run.is_complete = stats["complete"]
-            run.status = "succeeded" if run.is_complete else "partial"
+            run.status = "partial" if (result.errors or stats["anomaly"]) else "succeeded"
             if result.errors:
                 run.error = "\n".join(result.errors[:20])
             if source.kind == "api":
-                if run.is_complete:
+                if run.status == "succeeded" and run.is_complete:
                     source.last_success_at = run.finished_at = utcnow()
                     source.last_error = None
                     resolve_alerts(db, {f"sync_failed:{source.code}"}, resolution="Sincronización correcta")
-                else:
+                elif run.status == "partial":
                     open_alert(db, f"sync_partial:{source.code}", "sync_partial", "warning",
                                f"{source.name}: sincronización incompleta", run.error, run_id=run.id)
         except Exception as exc:  # noqa: BLE001 - se registra y la ejecución queda como fallida
@@ -126,19 +128,19 @@ class SyncEngine:
         db = self.db
         now = utcnow()
         priorities = {s.code: s.priority for s in db.execute(select(InventorySource)).scalars()}
-        complete = result.complete
+        anomaly = False
 
         # Caída anómala respecto a la última ejecución completa de la misma fuente.
         prev = db.execute(
             select(InventoryRun).where(InventoryRun.source_id == source.id, InventoryRun.is_complete.is_(True),
                                        InventoryRun.id != run.id).order_by(InventoryRun.id.desc()).limit(1)
         ).scalar_one_or_none()
-        if prev and prev.stats and complete and result.devices_complete and source.kind == "api":
+        if prev and prev.stats and result.complete and source.kind == "api":
             prev_dev, prev_inst = prev.stats.get("devices_seen", 0), prev.stats.get("installs_seen", 0)
             drop_dev = prev_dev and (prev_dev - len(result.devices)) / prev_dev > DEVICE_DROP_THRESHOLD
             drop_inst = prev_inst and (prev_inst - len(result.installs)) / prev_inst > INSTALL_DROP_THRESHOLD
             if drop_dev or drop_inst:
-                complete = False
+                anomaly = True
                 msg = (f"Caída anómala: {len(result.devices)} dispositivos (antes {prev_dev}), "
                        f"{len(result.installs)} instalaciones (antes {prev_inst}). No se infieren bajas.")
                 log(msg)
@@ -205,9 +207,11 @@ class SyncEngine:
         db.flush()
 
         # 4. Desinstalaciones (solo equipos con lectura íntegra) y cambios de versión.
+        # Desinstalaciones: solo en equipos cuyo software se leyó íntegro, sin errores ni anomalías.
         complete_devices = {device_map[k].id for k in result.software_complete_for if k in device_map}
-        if not complete:
+        if result.errors or anomaly:
             complete_devices = set()
+        complete = result.complete and not anomaly
         # Salvaguarda por equipo: si su software cae bruscamente (p.ej. pegado truncado), no se infieren bajas.
         for device_id in sorted(complete_devices):
             before = present_before.get(device_id, 0)
@@ -250,7 +254,7 @@ class SyncEngine:
 
         # 5. Dispositivos no observados en una extracción completa de la fuente de existencia.
         not_observed = 0
-        if complete and result.devices_complete and source.kind == "api":
+        if complete and source.kind == "api":
             seen_ids = {d.id for d in device_map.values()}
             known = db.execute(
                 select(Device).join(DeviceExternalId, DeviceExternalId.device_id == Device.id)
@@ -286,6 +290,7 @@ class SyncEngine:
             f"{installed_count} altas, {removed_count} bajas, {version_changes} cambios de versión.")
         return {
             "complete": complete,
+            "anomaly": anomaly,
             "devices_seen": len(result.devices),
             "devices_matched": len(device_map),
             "devices_created": created_devices,
