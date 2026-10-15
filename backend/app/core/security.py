@@ -63,6 +63,12 @@ def get_current_user(request: Request, db: Session = Depends(get_db),
                      settings: Settings = Depends(get_settings)) -> CurrentUser:
     if settings.auth_mode == "dev":
         return CurrentUser(upn=settings.dev_user_upn, name="Desarrollo", role=settings.dev_user_role)
+    if settings.auth_mode == "local":
+        # Servicio en el propio equipo: la configuración garantiza que solo escucha en 127.0.0.1.
+        # Se rechaza además cualquier petición que no venga del propio equipo.
+        if request.client and request.client.host not in ("127.0.0.1", "::1", "testclient"):
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Acceso solo desde este equipo")
+        return CurrentUser(upn=settings.local_user_upn, name="Administrador local", role="admin")
 
     header = request.headers.get("Authorization", "")
     if not header.startswith("Bearer "):

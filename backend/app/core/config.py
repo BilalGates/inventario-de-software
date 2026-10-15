@@ -1,7 +1,9 @@
 """Configuración de Inventario Asserta 2.0, leída de variables de entorno / .env."""
 from __future__ import annotations
 
+import os
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 from pydantic import Field, model_validator
@@ -9,7 +11,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_prefix="INV_", extra="ignore")
+    model_config = SettingsConfigDict(env_prefix="INV_", extra="ignore")
 
     environment: Literal["development", "test", "production"] = "development"
 
@@ -19,7 +21,8 @@ class Settings(BaseSettings):
     # Autenticación
     # - "entra": valida tokens de Microsoft Entra ID (obligatorio en producción).
     # - "dev": identidad fija tomada de dev_user_*; solo se permite fuera de producción.
-    auth_mode: Literal["entra", "dev"] = "dev"
+    # - "local": servicio en el propio PC, solo accesible desde 127.0.0.1; usuario único (local_user_*).
+    auth_mode: Literal["entra", "dev", "local"] = "dev"
     entra_tenant_id: str = ""
     entra_api_client_id: str = ""  # App registration de la API (audience)
     entra_spa_client_id: str = ""  # App registration del frontend (se expone a la SPA)
@@ -29,6 +32,11 @@ class Settings(BaseSettings):
     entra_role_auditor: str = "Inventario.Auditor"
     dev_user_upn: str = "dev@localhost"
     dev_user_role: Literal["admin", "technician", "auditor"] = "admin"
+    local_user_upn: str = "administrador@local"
+
+    # Servidor (servicio de Windows / app.server)
+    bind_host: str = "127.0.0.1"
+    port: int = 8080
 
     # Microsoft Graph (conector Intune, credenciales de aplicación)
     graph_tenant_id: str = ""
@@ -51,13 +59,16 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _check_production(self) -> "Settings":
+        if self.auth_mode == "local" and self.bind_host not in ("127.0.0.1", "localhost", "::1"):
+            raise ValueError("INV_AUTH_MODE=local solo puede escuchar en 127.0.0.1: sin login, "
+                             "exponerlo en la red daría acceso a cualquiera. Use 'entra' para acceso en red.")
         if self.environment == "production":
-            if self.auth_mode != "entra":
-                raise ValueError("En producción INV_AUTH_MODE debe ser 'entra'.")
-            if not (self.entra_tenant_id and self.entra_api_client_id):
+            if self.auth_mode == "dev":
+                raise ValueError("En producción INV_AUTH_MODE debe ser 'entra' o 'local'.")
+            if self.auth_mode == "entra" and not (self.entra_tenant_id and self.entra_api_client_id):
                 raise ValueError("Faltan INV_ENTRA_TENANT_ID / INV_ENTRA_API_CLIENT_ID.")
-            if self.database_url.startswith("sqlite"):
-                raise ValueError("SQLite no está soportado en producción; usa MySQL.")
+            if self.auth_mode == "entra" and self.database_url.startswith("sqlite"):
+                raise ValueError("Con acceso multiusuario (entra) use MySQL, no SQLite.")
         return self
 
     @property
@@ -69,6 +80,19 @@ class Settings(BaseSettings):
         )
 
 
+# Configuración del servicio de Windows (fuera del repositorio, solo legible por administradores).
+SERVICE_DIR = Path(os.environ.get("ProgramData", r"C:\ProgramData")) / "InventarioAsserta"
+
+
+def env_files() -> list[Path]:
+    """Orden de lectura: INV_ENV_FILE, configuración del servicio y backend/.env (desarrollo)."""
+    files = [SERVICE_DIR / "inventario.env", Path(__file__).resolve().parents[2] / ".env"]
+    if os.environ.get("INV_ENV_FILE"):
+        files.insert(0, Path(os.environ["INV_ENV_FILE"]))
+    return [f for f in files if f.is_file()]
+
+
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
-    return Settings()
+    # Las variables de entorno prevalecen; entre ficheros, el primero de la lista.
+    return Settings(_env_file=list(reversed(env_files())) or None)

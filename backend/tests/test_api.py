@@ -271,3 +271,26 @@ def test_queue_status_visible(client, db):
 def test_create_device_with_explicit_status(client):
     r = client.post("/api/devices", json={"hostname": "PC-STOCK", "status": "in_stock"})
     assert r.status_code == 201 and r.json()["status"] == "in_stock"
+
+
+def test_local_mode_only_on_loopback():
+    Settings(environment="production", auth_mode="local", bind_host="127.0.0.1")  # válido, SQLite incluido
+    with pytest.raises(ValueError):
+        Settings(environment="production", auth_mode="local", bind_host="0.0.0.0")
+    with pytest.raises(ValueError):
+        Settings(environment="production", auth_mode="entra", entra_tenant_id="t", entra_api_client_id="a",
+                 database_url="sqlite:///x.db")
+
+
+def test_local_mode_rejects_remote_clients():
+    from types import SimpleNamespace
+
+    from fastapi import HTTPException
+
+    s = Settings(environment="production", auth_mode="local")
+    local = SimpleNamespace(client=SimpleNamespace(host="127.0.0.1"), headers={})
+    assert get_current_user(local, db=None, settings=s).role == "admin"
+    remote = SimpleNamespace(client=SimpleNamespace(host="192.168.1.50"), headers={})
+    with pytest.raises(HTTPException) as err:
+        get_current_user(remote, db=None, settings=s)
+    assert err.value.status_code == 403

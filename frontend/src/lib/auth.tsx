@@ -8,7 +8,7 @@ import { api, setTokenProvider } from "./api";
 import type { Me } from "./types";
 
 interface PublicConfig {
-  auth_mode: "entra" | "dev";
+  auth_mode: "entra" | "dev" | "local";
   tenant_id: string;
   client_id: string;
   api_scope: string | null;
