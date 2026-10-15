@@ -88,7 +88,8 @@ def scan_drop_dir(db, drop_dir: str) -> int:
     (base / "processed").mkdir(exist_ok=True)
     (base / "failed").mkdir(exist_ok=True)
     count = 0
-    for path in sorted(base.glob("*.txt")) + sorted(base.glob("*.csv")):
+    csvs = [p for p in sorted(base.glob("*.csv")) if not p.name.startswith("Errores_Inventario_Intune_")]
+    for path in sorted(base.glob("*.txt")) + csvs:
         try:
             content = decode(path.read_bytes())
             if path.suffix.lower() == ".txt":
@@ -97,8 +98,16 @@ def scan_drop_dir(db, drop_dir: str) -> int:
                 run_service.enqueue(db, "panda", "watcher", "system:watcher",
                                     {"content": content, "filename": path.name})
             else:
+                # Salida de Inventario_Programas_Intune.ps1: es completa si el script no dejó
+                # su fichero de errores con la misma marca de tiempo.
+                stamp = path.stem.removeprefix("Inventario_Programas_Intune_")
+                is_script = stamp != path.stem
+                errors = base / f"Errores_Inventario_Intune_{stamp}.csv"
                 run_service.enqueue(db, "intune", "watcher", "system:watcher",
-                                    {"content": content, "filename": path.name})
+                                    {"content": content, "filename": path.name, "kind": "apps" if is_script else None,
+                                     "declared_complete": is_script and not errors.exists()})
+                if is_script and errors.exists():
+                    shutil.move(str(errors), str(base / "processed" / f"{utcnow():%Y%m%d%H%M%S}_{errors.name}"))
             db.commit()
             target = base / "processed" / f"{utcnow():%Y%m%d%H%M%S}_{path.name}"
             count += 1
@@ -121,6 +130,8 @@ def tick(settings=None) -> dict:
             summary["enqueued"] += 1
         db.commit()
         summary["files"] = scan_drop_dir(db, settings.panda_drop_dir)
+        if settings.intune_drop_dir:
+            summary["files"] += scan_drop_dir(db, settings.intune_drop_dir)
     while not _stop:
         with session_scope() as db:
             run = run_service.claim_next(db)

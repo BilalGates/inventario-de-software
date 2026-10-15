@@ -49,6 +49,8 @@ class Settings(BaseSettings):
 
     # Carpeta supervisada para exportaciones de Panda (contingencia sin API)
     panda_drop_dir: str = ""
+    # Carpeta donde Inventario_Programas_Intune.ps1 deja sus CSV (se importan solos)
+    intune_drop_dir: str = ""
 
     # Worker
     worker_poll_seconds: int = 15

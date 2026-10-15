@@ -18,13 +18,14 @@ Rama: `feature/inventario-2.0`. Última actualización: 2026-10-15.
 - Interfaz web completa (claro/oscuro, responsive) y servicio de Windows (`app.server` probado en
   primer plano en modo producción/local).
 - Migración legacy no destructiva e idempotente (probada con esquema representativo).
+- Script `Inventario_Programas_Intune.ps1` analizado e integrado: su CSV se importa solo desde `Escritorio\Inventario_Intune`.
 - Corrección en el parser legacy: la cabecera "Versión" se importaba como programa.
 
 ## Pruebas (2026-10-15)
 
 | Suite | Resultado |
 |---|---|
-| Backend `pytest` | 57 pruebas OK (conectores simulados, motor, API, RBAC, Entra JWT, migraciones, legacy, worker, modo local) |
+| Backend `pytest` | 59 pruebas OK (conectores simulados, motor, API, RBAC, Entra JWT, migraciones, legacy, worker, modo local) |
 | Backend `ruff` | sin errores |
 | Frontend `vitest` | 12 pruebas OK · `tsc` sin errores · build OK |
 | E2E Playwright | 3 flujos OK contra API + worker reales (departamento → dispositivo → Panda → autorización → alerta → inventario mensual → verificación de auditoría; movimiento masivo; Intune sin credenciales) |
@@ -36,7 +37,7 @@ Rama: `feature/inventario-2.0`. Última actualización: 2026-10-15.
 | Tarea | Falta |
 |---|---|
 | Validar Intune real (cifras, estrategia `per_app`/`per_device`, RAM) | Registro de aplicación + permiso `DeviceManagementManagedDevices.Read.All` + credencial |
-| Analizar `Inventario_Programas_Intune(1).ps1` y su CSV | Los ficheros no estaban en el equipo; facilitarlos para validar cifras y columnas |
+| Validar cifras con un CSV real del script | Ejecutar el script una vez con el servicio instalado (se importa solo) |
 | Conector API de Panda/WatchGuard | Confirmar licencia de API y credenciales |
 | Instalar el servicio en el equipo | Ejecutar `deploy\windows\install-service.ps1` como administrador (no verificado: requiere elevación) |
 | Migrar datos reales | Simulación `--dry-run` contra la BD MySQL actual con usuario de solo lectura |

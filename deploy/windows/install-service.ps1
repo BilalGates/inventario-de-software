@@ -21,6 +21,8 @@ $Py       = Join-Path $Venv "Scripts\python.exe"
 $DataDir  = Join-Path $env:ProgramData "InventarioAsserta"
 $EnvFile  = Join-Path $DataDir "inventario.env"
 $Service  = "InventarioAsserta"
+# Carpeta donde Inventario_Programas_Intune.ps1 guarda sus CSV (escritorio del usuario que instala)
+$IntuneDir = Join-Path ([Environment]::GetFolderPath("Desktop")) "Inventario_Intune"
 
 Write-Host "1/6 Entorno Python" -ForegroundColor Cyan
 if (-not (Test-Path $Py)) { python -m venv $Venv }
@@ -36,7 +38,9 @@ if (-not (Test-Path (Join-Path $Frontend "dist\index.html"))) {
 Write-Host "3/6 Configuración en $DataDir" -ForegroundColor Cyan
 New-Item -ItemType Directory -Force $DataDir | Out-Null
 if (-not (Test-Path $EnvFile)) {
-  $db = ($DataDir -replace '\', '/') + "/inventario.db"
+  $DataFwd   = $DataDir.Replace('\', '/')
+  $IntuneFwd = $IntuneDir.Replace('\', '/')
+  $db = "$DataFwd/inventario.db"
   @"
 # Inventario Asserta - configuración del servicio (no subir a ningún repositorio)
 INV_ENVIRONMENT=production
@@ -46,13 +50,16 @@ INV_BIND_HOST=127.0.0.1
 INV_PORT=$Port
 INV_DATABASE_URL=sqlite:///$db
 # Carpeta donde dejar exportaciones de Panda (<HOSTNAME>.txt) para importarlas solas:
-INV_PANDA_DROP_DIR=$($DataDir -replace '\', '/')/panda
+INV_PANDA_DROP_DIR=$DataFwd/panda
+# CSV generados por Inventario_Programas_Intune.ps1 (se importan solos y pasan a processed\)
+INV_INTUNE_DROP_DIR=$IntuneFwd
 # Credenciales de Microsoft Graph (Intune). Ver docs/integrations.md:
 # INV_GRAPH_TENANT_ID=
 # INV_GRAPH_CLIENT_ID=
 # INV_GRAPH_CLIENT_SECRET=
 "@ | Set-Content -Encoding utf8 $EnvFile
   New-Item -ItemType Directory -Force (Join-Path $DataDir "panda") | Out-Null
+  New-Item -ItemType Directory -Force $IntuneDir | Out-Null
 }
 # Solo administradores y SYSTEM pueden leer la configuración y la base de datos.
 icacls $DataDir /inheritance:r /grant:r "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-18:(OI)(CI)F" | Out-Null

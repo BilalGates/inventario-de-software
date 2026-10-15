@@ -58,13 +58,31 @@ Los errores registran solo el código de Graph, nunca el cuerpo ni tokens.
 **Incrementalidad**: Graph no ofrece *delta* para managedDevices/detectedApps. Cada ejecución es
 completa (volumen bajo); la idempotencia la garantiza el motor.
 
-### Script PowerShell y CSV de referencia
+### Script `Inventario_Programas_Intune.ps1` (analizado 2026-10-15)
 
-`Inventario_Programas_Intune(1).ps1` y su CSV de ejemplo **no estaban disponibles en el equipo
-de desarrollo**, así que no se han analizado ni verificado sus cifras (28 dispositivos,
-3.340 instalaciones, 562 nombres). El importador CSV de Intune acepta las cabeceras habituales
-(`DeviceId`, `DeviceName`, `AppName`/`DisplayName`, `Publisher`, `Version`, `Platform`…) y
-detecta el separador; **pendiente**: validar con el CSV real y ajustar alias de columnas si hace falta.
+Usa la misma técnica que la estrategia `per_app` del conector: `detectedApps` (descarta las que
+tienen `deviceCount = 0`) y, por cada app, `detectedApps/{id}/managedDevices`, con paginación y
+reintentos con backoff. Diferencias con el conector:
+
+| Aspecto | Script | Conector 2.0 |
+|---|---|---|
+| Autenticación | Delegada e interactiva (`Connect-MgGraph`, usuario con acceso a Intune) | De aplicación, sin intervención (certificado/secreto) |
+| `Retry-After` / 403 | No los distingue: reintenta cualquier error | Respeta `Retry-After`; 403 falla al instante |
+| Fallos parciales | Los guarda en `Errores_Inventario_Intune_<fecha>.csv` y sigue | Ejecución parcial: sin inferir bajas |
+| Hardware del equipo | No lo extrae | `managedDevices` completo (serie, modelo, RAM, disco, cifrado, cumplimiento…) |
+
+**Integración ya operativa (sin credenciales de aplicación):** el servicio vigila
+`INV_INTUNE_DROP_DIR` (por defecto `Escritorio\Inventario_Intune`, donde el script guarda sus CSV).
+Cada `Inventario_Programas_Intune_<fecha>.csv` se importa solo (separador `;`, columnas
+`Equipo, Usuario, Programa, Version, Editor, PlataformaApp, SistemaOperativo, VersionSO,
+UltimaSincronizacion, AzureADDeviceId, IntuneDeviceId`): crea o concilia los equipos por id de
+Intune/Entra, asigna el usuario y carga el software. Se considera completa (y por tanto registra
+desinstalaciones) **solo si no existe** el `Errores_Inventario_Intune_<fecha>.csv` correspondiente.
+Al ser un CSV, nunca cuenta como extracción completa del parque para el inventario mensual;
+para eso sigue haciendo falta el conector API.
+
+Las cifras de referencia (28 equipos, 3.340 instalaciones, 562 programas) se comprobarán con la
+primera ejecución real: aparecen en *Sincronización › ejecución*.
 
 ## Panda Adaptive Defense
 

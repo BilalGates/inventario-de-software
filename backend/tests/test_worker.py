@@ -48,3 +48,33 @@ def test_drop_folder_ingests_and_moves_files(db, tmp_path):
     assert not list(tmp_path.glob("*.txt"))
     queued = db.execute(select(InventoryRun).where(InventoryRun.trigger == "watcher")).scalars().all()
     assert len(queued) == 2
+
+
+SCRIPT_CSV = ('"Equipo";"Usuario";"Programa";"Version";"Editor";"PlataformaApp";"SistemaOperativo";"VersionSO";'
+              '"UltimaSincronizacion";"AzureADDeviceId";"IntuneDeviceId"\n'
+              '"PC-01";"ana@asserta.es";"Google Chrome";"130.0";"Google LLC";"windows";"Windows";"10.0.22631";'
+              '"10/14/2026 8:00:00 AM";"aad-1";"int-1"\n'
+              '"PC-01";"ana@asserta.es";"7-Zip 23.01 (x64)";"23.01";"Igor Pavlov";"windows";"Windows";"10.0.22631";'
+              '"10/14/2026 8:00:00 AM";"aad-1";"int-1"\n')
+
+
+def test_intune_script_csv_is_imported_from_folder(db, tmp_path):
+    from app.models import Device, SoftwareInstallation
+
+    (tmp_path / "Inventario_Programas_Intune_2026-10-15_09-00-00.csv").write_text("﻿" + SCRIPT_CSV, encoding="utf-8")
+    assert worker.scan_drop_dir(db, str(tmp_path)) == 1
+    run = runs.claim_next(db)
+    assert run.params["declared_complete"] is True
+    done = runs.execute_run(db, run)
+    assert done.status == "succeeded", done.error
+    dev = db.execute(select(Device)).scalar_one()
+    assert dev.hostname == "PC-01" and dev.primary_user.upn == "ana@asserta.es" and dev.os_version == "10.0.22631"
+    assert {e.id_type for e in dev.external_ids} == {"intune_device_id", "entra_device_id"}
+    assert len(db.execute(select(SoftwareInstallation)).scalars().all()) == 2
+
+
+def test_intune_script_with_errors_file_is_not_complete(db, tmp_path):
+    (tmp_path / "Inventario_Programas_Intune_2026-10-15_09-00-00.csv").write_text(SCRIPT_CSV, encoding="utf-8")
+    (tmp_path / "Errores_Inventario_Intune_2026-10-15_09-00-00.csv").write_text("x", encoding="utf-8")
+    assert worker.scan_drop_dir(db, str(tmp_path)) == 1
+    assert runs.claim_next(db).params["declared_complete"] is False

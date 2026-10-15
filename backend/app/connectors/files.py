@@ -115,12 +115,18 @@ DEVICE_COLUMNS = {
     "last_sync": ["Last check-in", "LastSyncDateTime", "Last inventory date", "lastSyncDateTime"],
 }
 APP_COLUMNS = {
-    "device_id": ["DeviceId", "Device ID", "ManagedDeviceId", "IntuneDeviceId"],
+    "device_id": ["IntuneDeviceId", "DeviceId", "Device ID", "ManagedDeviceId"],
     "hostname": ["DeviceName", "Device name", "Device", "Equipo", "ComputerName", "Hostname"],
     "name": ["AppName", "Application", "DisplayName", "Application name", "App", "Programa", "Name"],
     "publisher": ["Publisher", "Editor", "Fabricante"],
     "version": ["Version", "AppVersion", "Versión", "Application version"],
-    "platform": ["Platform", "Plataforma"],
+    "platform": ["Platform", "Plataforma", "PlataformaApp"],
+    # Columnas de dispositivo que añade Inventario_Programas_Intune.ps1
+    "entra_id": ["AzureADDeviceId", "azureADDeviceId"],
+    "upn": ["Usuario", "UserPrincipalName", "userPrincipalName"],
+    "os_name": ["SistemaOperativo", "OperatingSystem", "operatingSystem"],
+    "os_version": ["VersionSO", "OSVersion", "osVersion"],
+    "last_sync": ["UltimaSincronizacion", "LastSyncDateTime", "lastSyncDateTime"],
 }
 
 
@@ -265,7 +271,15 @@ class IntuneCsvConnector:
             key = device_id or f"host:{hostname.upper()}"
             if key not in devices:
                 ids = {"intune_device_id": device_id} if device_id else {"hostname": hostname.upper()}
-                devices[key] = DeviceRecord(key=key, ids=ids, hostname=hostname)
+                entra = _cell(row, cols, "entra_id")
+                if entra and entra != "00000000-0000-0000-0000-000000000000":
+                    ids["entra_device_id"] = entra.lower()
+                upn = _cell(row, cols, "upn")
+                devices[key] = DeviceRecord(
+                    key=key, ids=ids, hostname=hostname, user_upn=upn.lower() if upn and "@" in upn else None,
+                    os_name=_cell(row, cols, "os_name"), os_version=_cell(row, cols, "os_version"),
+                    source_last_sync_at=_date(_cell(row, cols, "last_sync")),
+                )
             result.installs.append(InstallRecord(
                 device_key=key,
                 name=name,
