@@ -131,3 +131,9 @@ class TestPandaParser:
         result = parse_panda_text("App\tEditor\t01/01/2026\t1 MB\t1.0\tEXTRA\n")
         assert not result.ok
         assert "5 columnas" in result.errors[0].message
+
+
+def test_accented_header_is_not_imported_as_program():
+    text = "Nombre\tEditor\tFecha de instalación\tTamaño\tVersión\nAnyDesk\tAnyDesk Software GmbH\t10/03/2026\t2 MB\t9.0.10\n"
+    result = parse_panda_text(text)
+    assert [r["nombre"] for r in result.rows] == ["AnyDesk"]
