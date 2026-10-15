@@ -124,7 +124,7 @@ def test_hostname_collision_with_other_identity_creates_review_case(db):
     other = device(9, deviceName="PC-001")
     run_intune(db, FakeGraph([device(1), other], {}))
     assert count(db, Device) == 2  # no se fusionan
-    assert count(db, ReviewCase, ReviewCase.status == "open") == 0 or True
+    assert count(db, ReviewCase, ReviewCase.status == "open") == 1  # IT decide si son el mismo
     # PC-001 original sigue apuntando a intune-1; el nuevo tiene su propia identidad
     assert count(db, Device, Device.hostname_key == "PC-001") == 2
 
@@ -202,3 +202,15 @@ def test_api_runs_are_not_enqueued_twice(db):
     a = runs.enqueue(db, "intune", "manual", "t")
     b = runs.enqueue(db, "intune", "manual", "t")
     assert a.id == b.id
+
+
+def test_truncated_panda_paste_does_not_remove_software(db):
+    header = "Nombre\tEditor\tFecha de instalación\tTamaño\tVersión\n"
+    full = header + "".join(f"App {i}\tPub\t01/01/2026\t1 MB\t1.{i}\n" for i in range(20))
+    for content in (full, header + "App 0\tPub\t01/01/2026\t1 MB\t1.0\n"):
+        run = runs.enqueue(db, "panda", "upload", "t", {"content": content, "filename": "PC-X.txt"})
+        db.commit()
+        done = runs.execute_run(db, run)
+    assert done.status == "succeeded"
+    assert count(db, SoftwareInstallation, SoftwareInstallation.present.is_(False)) == 0
+    assert db.execute(select(Alert).where(Alert.dedup_key.like("device_drop:%"))).scalar_one()

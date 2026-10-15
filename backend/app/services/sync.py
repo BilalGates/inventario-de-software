@@ -41,6 +41,7 @@ from app.services.software import ProductResolver
 
 DEVICE_DROP_THRESHOLD = 0.25
 INSTALL_DROP_THRESHOLD = 0.40
+DEVICE_MIN_INSTALLS = 10  # por debajo, una variación grande es normal
 
 
 def _hash(payload: Any) -> str:
@@ -132,7 +133,7 @@ class SyncEngine:
             select(InventoryRun).where(InventoryRun.source_id == source.id, InventoryRun.is_complete.is_(True),
                                        InventoryRun.id != run.id).order_by(InventoryRun.id.desc()).limit(1)
         ).scalar_one_or_none()
-        if prev and prev.stats and complete and result.devices_complete:
+        if prev and prev.stats and complete and result.devices_complete and source.kind == "api":
             prev_dev, prev_inst = prev.stats.get("devices_seen", 0), prev.stats.get("installs_seen", 0)
             drop_dev = prev_dev and (prev_dev - len(result.devices)) / prev_dev > DEVICE_DROP_THRESHOLD
             drop_inst = prev_inst and (prev_inst - len(result.installs)) / prev_inst > INSTALL_DROP_THRESHOLD
@@ -175,6 +176,7 @@ class SyncEngine:
         observed: dict[int, set[tuple[int, int]]] = defaultdict(set)
         new_installs: dict[int, list[SoftwareInstallation]] = defaultdict(list)
         existing = self._existing_installs(source.code, {d.id for d in device_map.values()})
+        present_before = {dev: sum(1 for r in rows.values() if r.present) for dev, rows in existing.items()}
         baseline_devices = {dev_id for dev_id in {d.id for d in device_map.values()} if not existing.get(dev_id)}
         for inst in result.installs:
             device = device_map.get(inst.device_key)
@@ -206,6 +208,17 @@ class SyncEngine:
         complete_devices = {device_map[k].id for k in result.software_complete_for if k in device_map}
         if not complete:
             complete_devices = set()
+        # Salvaguarda por equipo: si su software cae bruscamente (p.ej. pegado truncado), no se infieren bajas.
+        for device_id in sorted(complete_devices):
+            before = present_before.get(device_id, 0)
+            now_seen = len(observed[device_id])
+            if before >= DEVICE_MIN_INSTALLS and now_seen < before * (1 - INSTALL_DROP_THRESHOLD):
+                complete_devices.discard(device_id)
+                msg = f"Dispositivo {device_id}: {now_seen} programas frente a {before}; no se infieren desinstalaciones."
+                log(msg)
+                result.warnings.append(msg)
+                open_alert(db, f"device_drop:{source.code}:{device_id}", "anomalous_drop", "warning",
+                           "Caída anómala de software en un dispositivo", msg, device_id=device_id, run_id=run.id)
         removed_count = installed_count = version_changes = 0
         for device_id, rows in existing.items():
             removed: list[SoftwareInstallation] = []

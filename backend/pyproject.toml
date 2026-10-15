@@ -1,0 +1,17 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = ["ignore::DeprecationWarning:starlette.*"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+extend-exclude = [".venv", "alembic/versions"]
+
+[tool.ruff.lint]
+select = ["E9", "F", "B", "I"]
+ignore = ["B008"]  # Depends()/Query() en argumentos es el patrón de FastAPI
+
+[tool.ruff.lint.isort]
+known-first-party = ["app", "tests"]
+known-third-party = ["alembic"]

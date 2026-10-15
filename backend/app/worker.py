@@ -134,6 +134,9 @@ def tick(settings=None) -> dict:
         snap = maybe_generate_monthly_snapshot(db)
         summary["snapshot"] = snap.id if snap else None
         check_stale_sources(db, int(get_setting(db, "alerts.stale_source_days") or 3))
+        hb = db.get(AppSetting, "worker.heartbeat") or AppSetting(key="worker.heartbeat")
+        hb.value, hb.updated_by = {"at": utcnow().isoformat(timespec="seconds"), **summary}, "system:worker"
+        db.add(hb)
     return summary
 
 
