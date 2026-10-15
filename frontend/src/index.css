@@ -1,0 +1,60 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Tokens de diseño: paleta neutra con un único acento y colores funcionales. */
+:root {
+  --bg: 247 248 249;
+  --surface: 255 255 255;
+  --subtle: 241 243 245;
+  --border: 226 229 233;
+  --fg: 17 24 39;
+  --muted: 100 109 122;
+  --accent: 15 118 110;
+  --accent-fg: 255 255 255;
+  --ok: 21 128 61;
+  --warn: 180 83 9;
+  --danger: 190 18 60;
+  --info: 37 99 235;
+  color-scheme: light;
+}
+
+.dark {
+  --bg: 12 14 17;
+  --surface: 20 23 27;
+  --subtle: 28 32 38;
+  --border: 41 46 54;
+  --fg: 232 235 239;
+  --muted: 148 156 168;
+  --accent: 45 212 191;
+  --accent-fg: 4 47 46;
+  --ok: 74 222 128;
+  --warn: 251 191 36;
+  --danger: 251 113 133;
+  --info: 96 165 250;
+  color-scheme: dark;
+}
+
+@layer base {
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    @apply bg-bg text-fg font-sans text-sm antialiased;
+    font-feature-settings: "cv11", "ss01", "tnum";
+  }
+  :focus-visible { @apply outline-none ring-2 ring-accent/60 ring-offset-1 ring-offset-bg; }
+  ::selection { @apply bg-accent/20; }
+}
+
+@layer components {
+  .card { @apply rounded-lg border border-border bg-surface; }
+  .label { @apply mb-1 block text-xs font-medium text-muted; }
+  .field {
+    @apply h-9 w-full rounded-md border border-border bg-surface px-3 text-sm text-fg placeholder:text-muted/70
+      transition-colors hover:border-muted/50 focus:border-accent disabled:opacity-60;
+  }
+  textarea.field { @apply h-auto py-2; }
+  .kbd { @apply rounded border border-border bg-subtle px-1.5 py-0.5 font-mono text-2xs text-muted; }
+  .num { font-variant-numeric: tabular-nums; }
+}
+
+dialog::backdrop { background: rgb(0 0 0 / 0.45); backdrop-filter: blur(2px); }

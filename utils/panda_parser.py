@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import unicodedata
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any
@@ -55,7 +56,9 @@ def _parse_date(raw: Any) -> date | None:
 
 
 def _is_header(values: list[str]) -> bool:
-    joined = " ".join(normalize_nombre(v) for v in values)
+    # Sin tildes: Panda exporta "Versión" y "VERSIÓN" no contiene "VERSION".
+    joined = unicodedata.normalize("NFKD", " ".join(normalize_nombre(v) for v in values))
+    joined = "".join(c for c in joined if not unicodedata.combining(c))
     return "NOMBRE" in joined and ("EDITOR" in joined or "FABRICANTE" in joined) and "VERSION" in joined
 
 

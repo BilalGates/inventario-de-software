@@ -1,126 +1,65 @@
-# Inventario Asserta
+# Inventario Asserta 2.0
 
-Herramienta interna de IT para gestionar el inventario de **software y hardware** de los equipos de Asserta.
-Permite importar software desde Panda Adaptive Defense, revisar cambios, controlar software autorizado
-y auditar el cumplimiento ENS (CCN-STIC Guía 105).
+Plataforma interna de IT para el inventario de dispositivos, software, departamentos,
+autorizaciones e inventarios mensuales de Asserta Global Healthcare Solutions.
 
-## Requisitos
+Es una **aplicación web** que se ejecuta como **servicio de Windows** en el equipo de IT y se
+usa desde el navegador en **http://127.0.0.1:8080**. Recoge datos de Microsoft Intune
+(Microsoft Graph) y de Panda Adaptive Defense (exportaciones), los normaliza, detecta
+cambios y genera evidencias de auditoría.
 
-- Python 3.11+
-- MySQL 8.0+
-- Windows 10/11 (para el `.exe` compilado)
+## Instalación rápida (servicio de Windows)
 
-## Instalación para desarrollo
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-```
-
-Copiar y editar las credenciales de BD:
+Requisitos: Windows 10/11, Python 3.11+ y Node.js 20+ (solo para compilar la interfaz).
 
 ```powershell
-copy .env.example .env
-# Editar .env con los datos de conexión MySQL
+# PowerShell como administrador, en la raíz del repositorio
+powershell -ExecutionPolicy Bypass -File deploy\windows\install-service.ps1
 ```
 
-Inicializar la base de datos:
+El script crea el entorno, compila la interfaz, guarda la configuración en
+`C:\ProgramData\InventarioAsserta\inventario.env`, registra el servicio con arranque
+automático y abre el navegador. Detalles, actualización, copias de seguridad y
+desinstalación: [docs/deployment.md](docs/deployment.md).
+
+## Desarrollo
 
 ```powershell
-python main.py --init-db
+cd backend; python -m venv .venv; .venv\Scripts\pip install -r requirements-dev.txt
+.venv\Scripts\python -m app.demo_data          # datos SINTÉTICOS de demostración (opcional)
+.venv\Scripts\uvicorn app.main:app --reload    # API en :8000
+.venv\Scripts\python -m app.worker             # worker (otra consola)
+cd ..\frontend; npm install; npm run dev       # interfaz en http://localhost:5173
 ```
 
-Importar datos históricos desde el Excel (primera vez):
+Pruebas: `backend> .venv\Scripts\pytest` · `frontend> npm test` · `frontend> npm run build; npm run test:e2e`.
 
-```powershell
-python main.py --init-db --import-historical
-```
+## Estructura
 
-Arrancar la aplicación:
-
-```powershell
-python main.py
-```
-
-## Compilar a .exe
-
-```powershell
-python scripts/build_exe.py
-```
-
-El ejecutable se genera en `dist/InventarioAsserta/InventarioAsserta.exe`.
-
-## Módulos
-
-| Módulo | Descripción |
+| Carpeta | Contenido |
 |---|---|
-| **Inicio** | Dashboard con KPIs, estado por departamento y alertas |
-| **Inventario Software** | Tabla completa con filtros por departamento y ENS, edición inline |
-| **Inventario Hardware** | Gestión de equipos con importación desde CSV |
-| **Auditoría ENS** | Cumplimiento CCN-STIC Guía 105 con informe exportable |
-| **Calidad de Datos** | Versiones sospechosas, fabricantes vacíos, software huérfano |
-| **Departamentos** | Vista completa por departamento: inventario, importar, exportar, dispositivos, reactivaciones |
-| **Importar Panda** | Wizard de importación desde Panda Adaptive Defense (paste o archivo) |
-| **Configuración** | Credenciales BD, prueba de conexión, información de la app |
-
-## Departamentos de Asserta
-
-`Gerencia` · `IT` · `Silicon` · `Data Science/Analytics` · `Administración` · `Servidores`
-
-## Configuración (.env)
-
-Copia `.env.example` a `.env` y usa un **usuario de BD dedicado** (no `root`):
-
-```env
-DB_HOST=localhost
-DB_PORT=3306
-DB_NAME=inventario_software
-DB_USER=inventario_app
-DB_PASSWORD=tu_contraseña
-# Solo desarrollo local desechable; deja false en cualquier entorno real:
-ALLOW_INSECURE_LOCAL_DB=false
-```
-
-> ⚠️ La app **no arranca** con `root` o contraseña vacía salvo que
-> `ALLOW_INSECURE_LOCAL_DB=true`. Cómo crear los usuarios `inventario_app`
-> (datos) e `inventario_migrator` (DDL): ver [docs/OPERACION.md](docs/OPERACION.md).
-
-## Primera puesta en marcha
-
-1. Crear la BD con `python main.py --init-db`
-2. Importar histórico: `python main.py --init-db --import-historical`
-   - Lee `resources/Inventario_Software_ENS_Por_Departamento.xlsx`
-   - Lee `resources/Inventario_Equipos_Asserta.csv`
-3. Abrir la app: `python main.py`
-
-## Seguridad de datos
-
-Esta herramienta maneja **inventario interno** (equipos, series, MAC, software por
-departamento). Reglas básicas:
-
-- **No subas datos reales al repo.** `.env`, `resources/*.csv|*.xlsx|*.vbs`,
-  `exports/`, `logs/`, `backups/` y los binarios están en `.gitignore`. Para
-  pruebas usa los ejemplos anónimos de [`resources/sample/`](resources/sample/).
-- **Usa un usuario MySQL dedicado** (no `root`); la app bloquea conexiones inseguras.
-- **Nunca `git push --force`** sin coordinación.
-
-Detalle completo (qué no subir, configurar `.env`, limpiar el historial con
-`git-filter-repo`): [docs/SEGURIDAD.md](docs/SEGURIDAD.md).
+| `backend/` | API FastAPI, modelo SQLAlchemy, migraciones Alembic, conectores, motor de sincronización, worker y servicio de Windows |
+| `frontend/` | Interfaz web (React + TypeScript + Tailwind) |
+| `deploy/windows/` | Instalación, desinstalación y copias de seguridad del servicio |
+| `docs/` | Documentación (abajo) |
+| raíz (`main.py`, `ui/`, `modules/`, `utils/`…) | Aplicación de escritorio PySide6 anterior. Se mantiene hasta validar la migración de datos; el parser de Panda (`utils/panda_parser.py`) lo reutiliza la versión web |
 
 ## Documentación
 
 | Tema | Documento |
 |---|---|
-| Arquitectura | [docs/ARQUITECTURA.md](docs/ARQUITECTURA.md) |
-| Modelo de datos | [docs/MODELO_DATOS.md](docs/MODELO_DATOS.md) |
-| Operación (instalar, migrar, build, backups) | [docs/OPERACION.md](docs/OPERACION.md) |
-| Seguridad | [docs/SEGURIDAD.md](docs/SEGURIDAD.md) |
-| Decisiones (ADR) | [docs/adr/](docs/adr/) |
+| Arquitectura | [docs/architecture.md](docs/architecture.md) |
+| Modelo de datos | [docs/data-model.md](docs/data-model.md) |
+| Integraciones (Intune, Panda) | [docs/integrations.md](docs/integrations.md) |
+| Instalación y operación | [docs/deployment.md](docs/deployment.md) |
+| Seguridad | [docs/security.md](docs/security.md) |
+| Migración desde la versión de escritorio | [docs/migration.md](docs/migration.md) |
+| Decisiones de arquitectura | [docs/decisions.md](docs/decisions.md) |
+| Estado del trabajo | [docs/progress.md](docs/progress.md) |
+| Documentación de la versión de escritorio | [docs/legacy/](docs/legacy/) |
 
-## Notas operativas
+## Datos y seguridad
 
-- **Versiones siempre como texto** — nunca `int`/`float`. El campo `version_referencia` es `VARCHAR(200)`.
-- **Sin borrados físicos** — las bajas se guardan como `activo = FALSE`.
-- **QTableView** en todas las tablas — nunca `QTableWidget`. Soporte fluido hasta 5000+ filas.
-- **QThread** para toda operación de BD — la UI nunca se congela.
+No suba datos reales ni credenciales al repositorio (es público). La configuración y la base
+de datos del servicio viven en `C:\ProgramData\InventarioAsserta`, fuera del repositorio.
+Ver [docs/security.md](docs/security.md), que incluye una exposición histórica pendiente de remediar.
