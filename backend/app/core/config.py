@@ -91,7 +91,16 @@ def env_files() -> list[Path]:
     files = [SERVICE_DIR / "inventario.env", Path(__file__).resolve().parents[2] / ".env"]
     if os.environ.get("INV_ENV_FILE"):
         files.insert(0, Path(os.environ["INV_ENV_FILE"]))
-    return [f for f in files if f.is_file()]
+    return [f for f in files if _readable(f)]
+
+
+def _readable(path: Path) -> bool:
+    """El inventario.env del servicio solo lo leen Administradores/SYSTEM: para el resto se ignora."""
+    try:
+        with path.open("rb"):
+            return True
+    except OSError:
+        return False
 
 
 @lru_cache(maxsize=1)
