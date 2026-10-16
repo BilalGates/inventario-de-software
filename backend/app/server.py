@@ -18,8 +18,9 @@ log = logging.getLogger("inventario.server")
 
 
 class InventoryServer:
-    def __init__(self) -> None:
+    def __init__(self, log_file: str | None = None) -> None:
         self.settings = get_settings()
+        self.log_file = log_file
         self._stop = threading.Event()
         self._uvicorn: uvicorn.Server | None = None
 
@@ -49,7 +50,7 @@ class InventoryServer:
         command.upgrade(cfg, "head")
 
     def run(self) -> None:
-        setup_logging()
+        setup_logging(log_file=self.log_file)
         s = self.settings
         if s.database_url.startswith("sqlite:///"):
             from pathlib import Path

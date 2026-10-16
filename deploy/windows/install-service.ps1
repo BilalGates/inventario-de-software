@@ -68,14 +68,20 @@ Write-Host "4/6 Componentes de servicio (pywin32)" -ForegroundColor Cyan
 & $Py (Join-Path $Venv "Scripts\pywin32_postinstall.py") -install -quiet | Out-Null
 
 Write-Host "5/6 Registro del servicio" -ForegroundColor Cyan
+# El servicio lo ejecuta el python.exe BASE (junto a python3xx.dll) con app\winservice.py;
+# el script añade las librerías del .venv. No se usa pythonservice.exe: copiado al .venv no
+# encuentra la DLL de Python y el servicio no llega a arrancar.
+$SvcArgs = @("--startup", "auto")
 Push-Location $Backend
 if (Get-Service $Service -ErrorAction SilentlyContinue) {
   Stop-Service $Service -Force -ErrorAction SilentlyContinue
-  & $Py -m app.winservice --startup auto update
+  & $Py -m app.winservice @SvcArgs update
 } else {
-  & $Py -m app.winservice --startup auto install
+  & $Py -m app.winservice @SvcArgs install
 }
 Pop-Location
+$image = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\$Service").ImagePath
+Write-Host "   Ejecutable del servicio: $image"
 # Reinicio automático si el proceso cae.
 sc.exe failure $Service reset= 86400 actions= restart/60000/restart/60000/restart/300000 | Out-Null
 
