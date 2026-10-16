@@ -22,6 +22,11 @@
     Escritorio\Inventario_Intune\Inventario_Programas_Intune_AAAA-MM-DD_HH-mm-ss.csv
 #>
 
+param(
+    # Inicio de sesion con codigo (https://microsoft.com/devicelogin) en lugar de ventana.
+    [switch]$DeviceCode
+)
+
 $ErrorActionPreference = "Stop"
 
 # ============================================================
@@ -133,9 +138,34 @@ Write-Host "Iniciando sesion en Microsoft Graph..." -ForegroundColor Cyan
 Write-Host "Usa una cuenta con acceso a Microsoft Intune." -ForegroundColor DarkGray
 Write-Host ""
 
-Connect-MgGraph `
-    -Scopes "DeviceManagementManagedDevices.Read.All" `
-    -NoWelcome
+# El inicio de sesion integrado de Windows (WAM) falla sin una ventana propietaria
+# ("A window handle must be configured"): se usa el navegador y, si no, codigo de dispositivo.
+try { Set-MgGraphOption -EnableLoginByWAM $false } catch {}
+
+function Connect-Inventario([switch]$Code) {
+    try {
+        if ($Code) { Connect-MgGraph -Scopes "DeviceManagementManagedDevices.Read.All" -NoWelcome -UseDeviceCode }
+        else { Connect-MgGraph -Scopes "DeviceManagementManagedDevices.Read.All" -NoWelcome }
+    }
+    catch {
+        # El SDK a veces lanza "Error al escribir en un agente de escucha" (EventSourceException)
+        # DESPUES de autenticar correctamente: si hay sesion, se continua.
+        if (Get-MgContext) { Write-Warning "Aviso interno de Microsoft Graph ignorado: sesion iniciada correctamente." }
+        else { throw }
+    }
+}
+
+if ($DeviceCode) {
+    Connect-Inventario -Code
+}
+else {
+    try { Connect-Inventario }
+    catch {
+        Write-Warning "No se pudo abrir el inicio de sesion en el navegador; se usara un codigo de dispositivo."
+        Connect-Inventario -Code
+    }
+}
+Write-Host "Sesion iniciada como: $((Get-MgContext).Account)" -ForegroundColor Green
 
 try {
     # ========================================================
