@@ -78,4 +78,6 @@ class InventoryServer:
 
 
 if __name__ == "__main__":
-    InventoryServer().run()
+    import os
+
+    InventoryServer(log_file=os.environ.get("INV_LOG_FILE") or None).run()
