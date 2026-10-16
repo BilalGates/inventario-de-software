@@ -4,7 +4,7 @@ Plataforma interna de IT para el inventario de dispositivos, software, departame
 autorizaciones e inventarios mensuales de Asserta Global Healthcare Solutions.
 
 Es una **aplicación web** que se ejecuta como **servicio de Windows** en el equipo de IT y se
-usa desde el navegador en **http://127.0.0.1:8080**. Recoge datos de Microsoft Intune
+usa desde el navegador en **http://127.0.0.1:8180**. Recoge datos de Microsoft Intune
 (Microsoft Graph) y de Panda Adaptive Defense (exportaciones), los normaliza, detecta
 cambios y genera evidencias de auditoría.
 

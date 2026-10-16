@@ -4,7 +4,7 @@
 
 ```powershell
 # PowerShell como ADMINISTRADOR, en la raíz del repositorio
-powershell -ExecutionPolicy Bypass -File deploy\windows\install-service.ps1   # -Port 8080 por defecto
+powershell -ExecutionPolicy Bypass -File deploy\windows\install-service.ps1   # -Port 8180 por defecto
 ```
 
 Pasos que realiza (idempotente; repetirlo tras `git pull` actualiza):
@@ -15,7 +15,7 @@ Pasos que realiza (idempotente; repetirlo tras `git pull` actualiza):
    Administradores y SYSTEM.
 4. Registra los componentes de pywin32.
 5. Instala (o actualiza) el servicio **InventarioAsserta** con inicio automático y reinicio ante fallos.
-6. Lo arranca, comprueba `/api/health` y abre http://127.0.0.1:8080.
+6. Lo arranca, comprueba `/api/health` y abre http://127.0.0.1:8180.
 
 Tras actualizar el código del frontend, borre `frontend\dist` o ejecute `npm run build` antes
 de reinstalar. Las migraciones de base de datos se aplican solas al arrancar el servicio.
@@ -26,7 +26,7 @@ de reinstalar. Las migraciones de base de datos se aplican solas al arrancar el 
 |---|---|---|
 | `INV_ENVIRONMENT` | `production` | Oculta `/api/docs` |
 | `INV_AUTH_MODE` | `local` | Sin login; **solo** acepta `127.0.0.1`. Para acceso en red: `entra` |
-| `INV_BIND_HOST` / `INV_PORT` | `127.0.0.1` / `8080` | En modo local no se permite otra IP |
+| `INV_BIND_HOST` / `INV_PORT` | `127.0.0.1` / `8180` | En modo local no se permite otra IP |
 | `INV_DATABASE_URL` | SQLite en ProgramData | MySQL: `mysql+pymysql://usuario:clave@host:3306/inventario_asserta?charset=utf8mb4` |
 | `INV_PANDA_DROP_DIR` | `…\InventarioAsserta\panda` | Carpeta supervisada |
 | `INV_GRAPH_*` | — | Ver [integrations.md](integrations.md) |
@@ -39,7 +39,7 @@ Tras cambiarlo: `Restart-Service InventarioAsserta`.
 
 | Tarea | Cómo |
 |---|---|
-| Estado | `Get-Service InventarioAsserta` · panel de la app · `http://127.0.0.1:8080/api/health` |
+| Estado | `Get-Service InventarioAsserta` · panel de la app · `http://127.0.0.1:8180/api/health` |
 | Parar / arrancar | `Stop-Service` / `Start-Service InventarioAsserta` |
 | Registros | Visor de eventos › Aplicación (origen `InventarioAsserta`) para arranque/parada; el detalle de cada sincronización está en *Sincronización › ejecución* |
 | Copia de seguridad | `deploy\windows\backup.ps1` (copia consistente en caliente a `…\InventarioAsserta\backups`). Programe una tarea diaria y copie la carpeta a un almacenamiento seguro |

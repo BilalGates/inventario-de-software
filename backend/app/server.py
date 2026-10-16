@@ -20,7 +20,7 @@ log = logging.getLogger("inventario.server")
 class InventoryServer:
     def __init__(self, log_file: str | None = None) -> None:
         self.settings = get_settings()
-        self.log_file = log_file
+        self.log_file = log_file or self.settings.log_file or None
         self._stop = threading.Event()
         self._uvicorn: uvicorn.Server | None = None
 
@@ -78,6 +78,4 @@ class InventoryServer:
 
 
 if __name__ == "__main__":
-    import os
-
-    InventoryServer(log_file=os.environ.get("INV_LOG_FILE") or None).run()
+    InventoryServer().run()

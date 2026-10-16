@@ -37,7 +37,7 @@ import win32serviceutil  # noqa: E402
 class InventarioService(win32serviceutil.ServiceFramework):
     _svc_name_ = "InventarioAsserta"
     _svc_display_name_ = "Inventario Asserta"
-    _svc_description_ = "Inventario IT de Asserta: interfaz web en http://127.0.0.1:8080 y sincronizaciones programadas."
+    _svc_description_ = "Inventario IT de Asserta: interfaz web en http://127.0.0.1:8180 y sincronizaciones programadas."
     # Lo aloja el python.exe BASE (junto a su DLL); el pythonservice.exe que pywin32 copia al
     # .venv no encuentra python3xx.dll.
     _exe_name_ = getattr(sys, "_base_executable", sys.executable)

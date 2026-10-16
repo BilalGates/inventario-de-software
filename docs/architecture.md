@@ -1,7 +1,7 @@
 # Arquitectura
 
 ```
-Navegador (http://127.0.0.1:8080)
+Navegador (http://127.0.0.1:8180)
         │  HTTPS/HTTP local
 ┌───────▼─────────────────────────────── Servicio de Windows "InventarioAsserta" ─┐
 │  app.server (un proceso)                                                         │

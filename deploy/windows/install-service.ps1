@@ -2,7 +2,7 @@
 <#
 .SYNOPSIS
   Instala Inventario Asserta como servicio de Windows (arranque automático).
-  Después se accede desde el navegador en http://127.0.0.1:8080 (solo desde este equipo).
+  Después se accede desde el navegador en http://127.0.0.1:8180 (solo desde este equipo).
 
 .NOTES
   Ejecutar en PowerShell como administrador, desde la raíz del repositorio:
@@ -10,7 +10,7 @@
   Es idempotente: puede repetirse para actualizar tras un "git pull".
 #>
 param(
-  [int]$Port = 8080
+  [int]$Port = 8180
 )
 $ErrorActionPreference = "Stop"
 $Repo     = Resolve-Path (Join-Path $PSScriptRoot "..\..")
