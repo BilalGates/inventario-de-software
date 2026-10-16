@@ -32,6 +32,8 @@ Rama: `feature/inventario-2.0`. Última actualización: 2026-10-15.
 | Legacy `pytest` (app de escritorio) | 60 pruebas OK |
 | CI | `.github/workflows/ci.yml`: legacy, backend y frontend+E2E (pendiente de su primera ejecución en GitHub) |
 
+**Instalado y verificado en el equipo de IT (2026-10-16):** arranque automático por tarea programada en http://127.0.0.1:8180; interfaz, API y reinicio automático comprobados.
+
 ## Bloqueado (requiere acción externa)
 
 | Tarea | Falta |
@@ -39,8 +41,8 @@ Rama: `feature/inventario-2.0`. Última actualización: 2026-10-15.
 | Validar Intune real (cifras, estrategia `per_app`/`per_device`, RAM) | Registro de aplicación + permiso `DeviceManagementManagedDevices.Read.All` + credencial |
 | Validar cifras con un CSV real del script | Ejecutar el script una vez con el servicio instalado (se importa solo) |
 | Conector API de Panda/WatchGuard | Confirmar licencia de API y credenciales |
-| Instalar el servicio en el equipo | Ejecutar `deploy\windows\install-service.ps1` como administrador (no verificado: requiere elevación) |
 | Migrar datos reales | Simulación `--dry-run` contra la BD MySQL actual con usuario de solo lectura |
+| Quitar el servicio de Windows fallido (reintenta cada 5 min) | `deploy\windows\uninstall-service.ps1` como administrador |
 | Remediar la exposición histórica | Rotar la contraseña de MySQL `root`; decidir sobre limpieza del historial |
 | Entra ID multiusuario | Solo si se decide abrir el acceso a más personas |
 

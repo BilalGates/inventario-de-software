@@ -3,24 +3,22 @@
 Plataforma interna de IT para el inventario de dispositivos, software, departamentos,
 autorizaciones e inventarios mensuales de Asserta Global Healthcare Solutions.
 
-Es una **aplicación web** que se ejecuta como **servicio de Windows** en el equipo de IT y se
+Es una **aplicación web** que arranca sola en segundo plano en el equipo de IT y se
 usa desde el navegador en **http://127.0.0.1:8180**. Recoge datos de Microsoft Intune
 (Microsoft Graph) y de Panda Adaptive Defense (exportaciones), los normaliza, detecta
 cambios y genera evidencias de auditoría.
 
-## Instalación rápida (servicio de Windows)
+## Instalación rápida
 
 Requisitos: Windows 10/11, Python 3.11+ y Node.js 20+ (solo para compilar la interfaz).
+No necesita permisos de administrador.
 
 ```powershell
-# PowerShell como administrador, en la raíz del repositorio
-powershell -ExecutionPolicy Bypass -File deploy\windows\install-service.ps1
+powershell -ExecutionPolicy Bypass -File deploy\windows\install-autostart.ps1
 ```
 
-El script crea el entorno, compila la interfaz, guarda la configuración en
-`C:\ProgramData\InventarioAsserta\inventario.env`, registra el servicio con arranque
-automático y abre el navegador. Detalles, actualización, copias de seguridad y
-desinstalación: [docs/deployment.md](docs/deployment.md).
+Arranca al iniciar sesión, sin ventana, y se reinicia sola si cae. Datos y configuración en
+`%LOCALAPPDATA%\InventarioAsserta`. Detalles: [docs/deployment.md](docs/deployment.md).
 
 ## Desarrollo
 

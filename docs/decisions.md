@@ -48,3 +48,10 @@ y fusiones manuales auditadas.
 ### D11 — Rollup WebAssembly en el build del frontend
 La política de Windows del equipo de desarrollo bloquea el binario nativo de Rollup; se fuerza
 `@rollup/wasm-node` (mismo resultado, algo más lento).
+
+### D12 — Tarea programada + supervisor en lugar de servicio de Windows (2026-10-16)
+El servicio con pywin32 cae al arrancar con Python 3.12.0 (violación de acceso en
+python312.dll, reproducible y previa al código de la aplicación). Se sustituye por una tarea
+programada al iniciar sesión, sin administrador, que lanza `app.supervisor` (reinicia la
+aplicación si termina). Diferencia: arranca al iniciar sesión, no al encender el equipo;
+suficiente para un equipo de uso personal de IT.

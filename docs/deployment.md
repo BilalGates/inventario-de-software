@@ -1,6 +1,37 @@
-# Instalación y operación (servicio de Windows)
+# Instalación y operación
 
-## Instalar / actualizar
+## Método recomendado: arranque automático al iniciar sesión (sin administrador)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File deploy\windows\install-autostart.ps1
+```
+
+Registra la tarea programada **"Inventario Asserta"** de su usuario, que al iniciar sesión lanza
+en segundo plano (sin ventana) `app.supervisor`, el cual mantiene viva la aplicación y la
+reinicia si cae. Acceso: **http://127.0.0.1:8180**. Datos y configuración en
+`%LOCALAPPDATA%\InventarioAsserta` (`inventario.env`, `inventario.db`, `logs\`).
+
+| Tarea | Cómo |
+|---|---|
+| Estado | `http://127.0.0.1:8180/api/health` · `Get-ScheduledTask "Inventario Asserta"` |
+| Parar / arrancar | `Stop-ScheduledTask` / `Start-ScheduledTask "Inventario Asserta"` |
+| Registros | `%LOCALAPPDATA%\InventarioAsserta\logs\` (`app.log`, `app-output.log`, `supervisor.log`) |
+| Actualizar | `git pull`, borrar `frontend\dist` si cambió la interfaz, y volver a ejecutar el instalador |
+| Desinstalar | `deploy\windows\uninstall-autostart.ps1` (no borra datos) |
+
+Verificado el 2026-10-16 en el equipo de IT: arranque, interfaz, API y reinicio automático
+tras matar el proceso (relanzado en 10 s). El puerto 8080 lo ocupa un servicio de Windows
+(`svchost`) en ese equipo; por eso se usa 8180.
+
+## Alternativa: servicio de Windows (`install-service.ps1`) — NO operativa
+
+Con Python 3.12.0 el alojamiento de servicios de pywin32 provoca una violación de acceso en
+`python312.dll` al arrancar (evento 1000, `0xc0000005`), antes de ejecutar código de la
+aplicación. Se deja el script por si se actualiza Python/pywin32, pero no se recomienda.
+Si se instaló, elimínelo como administrador con `deploy\windows\uninstall-service.ps1`.
+
+### Detalle del servicio (referencia)
+
 
 ```powershell
 # PowerShell como ADMINISTRADOR, en la raíz del repositorio
