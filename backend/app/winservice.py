@@ -10,12 +10,16 @@ import sys
 import threading
 from pathlib import Path
 
-# El host de servicios (pythonservice.exe) no activa el entorno virtual: se añade a mano,
+# El servicio lo ejecuta el python.exe base, que no activa el entorno virtual: se añade a mano,
 # junto con la carpeta del backend, antes de importar nada más.
 BACKEND = Path(__file__).resolve().parents[1]
-_venv_site = BACKEND / ".venv" / "Lib" / "site-packages"
-if _venv_site.is_dir():
-    site.addsitedir(str(_venv_site))
+_venv = BACKEND / ".venv"
+if (_venv / "Lib" / "site-packages").is_dir():
+    site.addsitedir(str(_venv / "Lib" / "site-packages"))  # procesa también los .pth de pywin32
+    # Las librerías del .venv deben ir ANTES que las globales del Python base: si no, se
+    # mezclan versiones (p. ej. pydantic_core) y el proceso cae sin dejar rastro.
+    _ours = [p for p in sys.path if str(_venv).lower() in p.lower()]
+    sys.path[:] = _ours + [p for p in sys.path if p not in _ours and "site-packages" not in p.lower()]
 sys.path.insert(0, str(BACKEND))
 
 import servicemanager  # noqa: E402

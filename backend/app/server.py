@@ -44,7 +44,7 @@ class InventoryServer:
         from alembic.config import Config
 
         root = Path(__file__).resolve().parents[1]
-        cfg = Config(str(root / "alembic.ini"))
+        cfg = Config()  # sin alembic.ini: su configuración de logging sustituiría la del servicio
         cfg.set_main_option("script_location", str(root / "alembic"))
         cfg.set_main_option("sqlalchemy.url", self.settings.database_url)
         command.upgrade(cfg, "head")
