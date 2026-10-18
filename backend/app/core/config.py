@@ -36,7 +36,7 @@ class Settings(BaseSettings):
 
     # Servidor (servicio de Windows / app.server)
     bind_host: str = "127.0.0.1"
-    port: int = 8080
+    port: int = 8180
 
     # Microsoft Graph (conector Intune, credenciales de aplicación)
     graph_tenant_id: str = ""
@@ -54,6 +54,7 @@ class Settings(BaseSettings):
 
     # Worker
     worker_poll_seconds: int = 15
+    log_file: str = ""
     stale_device_days: int = 30
 
     cors_origins: list[str] = ["http://localhost:5173"]
@@ -88,10 +89,22 @@ SERVICE_DIR = Path(os.environ.get("ProgramData", r"C:\ProgramData")) / "Inventar
 
 def env_files() -> list[Path]:
     """Orden de lectura: INV_ENV_FILE, configuración del servicio y backend/.env (desarrollo)."""
-    files = [SERVICE_DIR / "inventario.env", Path(__file__).resolve().parents[2] / ".env"]
+    if os.environ.get("INV_ENVIRONMENT") == "test":
+        return []  # las pruebas nunca leen la configuración real del equipo
+    local = Path(os.environ.get("LOCALAPPDATA", "")) / "InventarioAsserta" / "inventario.env"
+    files = [local, SERVICE_DIR / "inventario.env", Path(__file__).resolve().parents[2] / ".env"]
     if os.environ.get("INV_ENV_FILE"):
         files.insert(0, Path(os.environ["INV_ENV_FILE"]))
-    return [f for f in files if f.is_file()]
+    return [f for f in files if _readable(f)]
+
+
+def _readable(path: Path) -> bool:
+    """El inventario.env del servicio solo lo leen Administradores/SYSTEM: para el resto se ignora."""
+    try:
+        with path.open("rb"):
+            return True
+    except OSError:
+        return False
 
 
 @lru_cache(maxsize=1)
