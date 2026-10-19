@@ -22,11 +22,6 @@
     Escritorio\Inventario_Intune\Inventario_Programas_Intune_AAAA-MM-DD_HH-mm-ss.csv
 #>
 
-param(
-    # Inicio de sesion con codigo (https://microsoft.com/devicelogin) en lugar de ventana.
-    [switch]$DeviceCode
-)
-
 $ErrorActionPreference = "Stop"
 
 # ============================================================
@@ -41,6 +36,47 @@ $OutputFile = Join-Path $OutputFolder "Inventario_Programas_Intune_$Fecha.csv"
 # FUNCIONES
 # ============================================================
 
+# Sin el modulo Microsoft.Graph: en Windows PowerShell 5.1 su Connect-MgGraph falla con
+# "Error al escribir en un agente de escucha" (EventSourceException). Se usa la API REST.
+$script:ClientId = "14d82eec-204b-4c2f-b7e8-296a70dab67e"   # Microsoft Graph Command Line Tools (app publica de Microsoft)
+$script:Scope    = "https://graph.microsoft.com/DeviceManagementManagedDevices.Read.All offline_access openid profile"
+$script:Token    = $null
+
+function Connect-GraphDeviceCode {
+    $dc = Invoke-RestMethod -Method POST -Uri "https://login.microsoftonline.com/organizations/oauth2/v2.0/devicecode" `
+        -Body @{ client_id = $script:ClientId; scope = $script:Scope }
+    Write-Host ""
+    Write-Host "Para iniciar sesion abre $($dc.verification_uri) y escribe el codigo:" -ForegroundColor Yellow
+    Write-Host "    $($dc.user_code)" -ForegroundColor Yellow
+    Write-Host ""
+    $deadline = (Get-Date).AddSeconds([int]$dc.expires_in)
+    while ((Get-Date) -lt $deadline) {
+        Start-Sleep -Seconds ([int]$dc.interval)
+        try {
+            $script:Token = Invoke-RestMethod -Method POST -Uri "https://login.microsoftonline.com/organizations/oauth2/v2.0/token" `
+                -Body @{ grant_type = "urn:ietf:params:oauth:grant-type:device_code"; client_id = $script:ClientId; device_code = $dc.device_code }
+            $script:Token | Add-Member -NotePropertyName ExpiresAt -NotePropertyValue (Get-Date).AddSeconds([int]$script:Token.expires_in - 120)
+            return
+        }
+        catch {
+            $err = $null
+            try { $err = ($_.ErrorDetails.Message | ConvertFrom-Json).error } catch {}
+            if ($err -eq "authorization_pending" -or $err -eq "slow_down") { continue }
+            throw "Inicio de sesion rechazado: $err"
+        }
+    }
+    throw "El codigo de inicio de sesion ha caducado."
+}
+
+function Update-GraphToken {
+    if ($script:Token -and (Get-Date) -ge $script:Token.ExpiresAt -and $script:Token.refresh_token) {
+        $t = Invoke-RestMethod -Method POST -Uri "https://login.microsoftonline.com/organizations/oauth2/v2.0/token" `
+            -Body @{ grant_type = "refresh_token"; client_id = $script:ClientId; refresh_token = $script:Token.refresh_token; scope = $script:Scope }
+        $t | Add-Member -NotePropertyName ExpiresAt -NotePropertyValue (Get-Date).AddSeconds([int]$t.expires_in - 120)
+        $script:Token = $t
+    }
+}
+
 function Invoke-GraphGetWithRetry {
     param(
         [Parameter(Mandatory = $true)]
@@ -53,9 +89,14 @@ function Invoke-GraphGetWithRetry {
 
     while ($true) {
         try {
-            return Invoke-MgGraphRequest -Method GET -Uri $Uri -OutputType PSObject
+            Update-GraphToken
+            return Invoke-RestMethod -Method GET -Uri $Uri -Headers @{ Authorization = "Bearer $($script:Token.access_token)" }
         }
         catch {
+            $Status = $null
+            try { $Status = [int]$_.Exception.Response.StatusCode } catch {}
+            if ($Status -eq 401 -or $Status -eq 403) { throw }   # permisos: no tiene sentido reintentar
+
             $Attempt++
 
             if ($Attempt -ge $MaxRetries) {
@@ -63,8 +104,12 @@ function Invoke-GraphGetWithRetry {
             }
 
             $WaitSeconds = [Math]::Min([Math]::Pow(2, $Attempt), 30)
+            try {
+                $RetryAfter = $_.Exception.Response.Headers["Retry-After"]
+                if ($RetryAfter) { $WaitSeconds = [Math]::Min([int]$RetryAfter, 300) }
+            } catch {}
 
-            Write-Warning "Error temporal consultando Microsoft Graph. Reintento $Attempt/$MaxRetries en $WaitSeconds segundos..."
+            Write-Warning "Error temporal consultando Microsoft Graph ($Status). Reintento $Attempt/$MaxRetries en $WaitSeconds segundos..."
             Start-Sleep -Seconds $WaitSeconds
         }
     }
@@ -108,27 +153,7 @@ if (-not (Test-Path $OutputFolder)) {
     New-Item -ItemType Directory -Path $OutputFolder -Force | Out-Null
 }
 
-# Instalar Microsoft Graph Authentication si no existe.
-if (-not (Get-Module -ListAvailable -Name Microsoft.Graph.Authentication)) {
-    Write-Host "Microsoft Graph no esta instalado." -ForegroundColor Yellow
-    Write-Host "Instalando Microsoft.Graph.Authentication para el usuario actual..." -ForegroundColor Yellow
-
-    try {
-        Install-Module Microsoft.Graph.Authentication `
-            -Scope CurrentUser `
-            -Force `
-            -AllowClobber
-    }
-    catch {
-        Write-Host ""
-        Write-Host "No se pudo instalar Microsoft.Graph.Authentication." -ForegroundColor Red
-        Write-Host "Prueba a abrir PowerShell como administrador y ejecutar:" -ForegroundColor Yellow
-        Write-Host "Install-Module Microsoft.Graph.Authentication -Scope CurrentUser -Force -AllowClobber"
-        throw
-    }
-}
-
-Import-Module Microsoft.Graph.Authentication
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 # ============================================================
 # LOGIN
@@ -138,34 +163,8 @@ Write-Host "Iniciando sesion en Microsoft Graph..." -ForegroundColor Cyan
 Write-Host "Usa una cuenta con acceso a Microsoft Intune." -ForegroundColor DarkGray
 Write-Host ""
 
-# El inicio de sesion integrado de Windows (WAM) falla sin una ventana propietaria
-# ("A window handle must be configured"): se usa el navegador y, si no, codigo de dispositivo.
-try { Set-MgGraphOption -EnableLoginByWAM $false } catch {}
-
-function Connect-Inventario([switch]$Code) {
-    try {
-        if ($Code) { Connect-MgGraph -Scopes "DeviceManagementManagedDevices.Read.All" -NoWelcome -UseDeviceCode }
-        else { Connect-MgGraph -Scopes "DeviceManagementManagedDevices.Read.All" -NoWelcome }
-    }
-    catch {
-        # El SDK a veces lanza "Error al escribir en un agente de escucha" (EventSourceException)
-        # DESPUES de autenticar correctamente: si hay sesion, se continua.
-        if (Get-MgContext) { Write-Warning "Aviso interno de Microsoft Graph ignorado: sesion iniciada correctamente." }
-        else { throw }
-    }
-}
-
-if ($DeviceCode) {
-    Connect-Inventario -Code
-}
-else {
-    try { Connect-Inventario }
-    catch {
-        Write-Warning "No se pudo abrir el inicio de sesion en el navegador; se usara un codigo de dispositivo."
-        Connect-Inventario -Code
-    }
-}
-Write-Host "Sesion iniciada como: $((Get-MgContext).Account)" -ForegroundColor Green
+Connect-GraphDeviceCode
+Write-Host "Sesion iniciada correctamente." -ForegroundColor Green
 
 try {
     # ========================================================
@@ -326,5 +325,5 @@ try {
     Write-Host "no a una consulta en tiempo real de cada ordenador." -ForegroundColor DarkGray
 }
 finally {
-    Disconnect-MgGraph | Out-Null
+    $script:Token = $null
 }
