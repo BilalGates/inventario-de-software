@@ -6,17 +6,6 @@ on:
   pull_request:
 
 jobs:
-  legacy:
-    name: Aplicación de escritorio (legacy)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: "3.12", cache: pip }
-      - run: pip install -r requirements-dev.txt
-      - run: ruff check . --exclude backend,frontend
-      - run: pytest -q tests
-
   backend:
     name: Backend 2.0
     runs-on: ubuntu-latest

@@ -40,7 +40,6 @@ Pruebas: `backend> .venv\Scripts\pytest` · `frontend> npm test` · `frontend> n
 | `frontend/` | Interfaz web (React + TypeScript + Tailwind) |
 | `deploy/windows/` | Instalación, desinstalación y copias de seguridad del servicio |
 | `docs/` | Documentación (abajo) |
-| raíz (`main.py`, `ui/`, `modules/`, `utils/`…) | Aplicación de escritorio PySide6 anterior. Se mantiene hasta validar la migración de datos; el parser de Panda (`utils/panda_parser.py`) lo reutiliza la versión web |
 
 ## Documentación
 

@@ -1,12 +1,11 @@
 # Migración desde la versión de escritorio (PySide6)
 
 La migración **solo lee** las tablas MySQL de la versión anterior; no las modifica, de modo que
-la aplicación de escritorio puede seguir usándose hasta validar la nueva.
+la base de datos anterior queda intacta. El código de la aplicación de escritorio se retiró el 2026-10-19 (sigue en el historial de git).
 
 ## Procedimiento
 
-1. **Copia de seguridad** de la BD actual (`scripts/backup_db.py` de la versión anterior o
-   `mysqldump`). Es el punto de recuperación.
+1. **Copia de seguridad** de la BD actual (`mysqldump`). Es el punto de recuperación.
 2. Crear un usuario MySQL **de solo lectura** sobre la BD anterior.
 3. Instalar el servicio (ver [deployment.md](deployment.md)); crea la BD nueva vacía.
 4. Simulación (no escribe nada, muestra el informe):

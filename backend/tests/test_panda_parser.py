@@ -1,5 +1,4 @@
-from utils.panda_parser import parse_panda_text
-
+from app.parsers.panda import parse_panda_text
 
 TABBED = (
     "Adobe Acrobat\tAdobeAcrobatDCCoreApp_26\t03/08/2026\t-\t26.1.0.0\n"

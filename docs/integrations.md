@@ -94,7 +94,7 @@ WatchGuard Cloud, y la documentación del endpoint de inventario de software de 
 **Ingesta por ficheros (operativa):**
 
 - Subida desde la ficha del dispositivo o desde *Sincronización* (reutiliza el parser estable
-  `utils/panda_parser.py`: tabulado, vertical o pegado sin tabuladores).
+  `backend/app/parsers/panda.py`: tabulado, vertical o pegado sin tabuladores).
 - **Carpeta supervisada**: dejar `<HOSTNAME>.txt` en `INV_PANDA_DROP_DIR`
   (por defecto `C:\ProgramData\InventarioAsserta\panda`). El worker los importa y los mueve a
   `processed/` o `failed/`.
