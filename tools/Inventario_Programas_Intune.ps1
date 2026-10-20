@@ -41,6 +41,7 @@ $OutputFile = Join-Path $OutputFolder "Inventario_Programas_Intune_$Fecha.csv"
 $script:ClientId = "14d82eec-204b-4c2f-b7e8-296a70dab67e"   # Microsoft Graph Command Line Tools (app publica de Microsoft)
 $script:Scope    = "https://graph.microsoft.com/DeviceManagementManagedDevices.Read.All offline_access openid profile"
 $script:Token    = $null
+$script:PausaEntrePeticionesMs = 250
 
 function Connect-GraphDeviceCode {
     $dc = Invoke-RestMethod -Method POST -Uri "https://login.microsoftonline.com/organizations/oauth2/v2.0/devicecode" `
@@ -82,7 +83,7 @@ function Invoke-GraphGetWithRetry {
         [Parameter(Mandatory = $true)]
         [string]$Uri,
 
-        [int]$MaxRetries = 6
+        [int]$MaxRetries = 8
     )
 
     $Attempt = 0
@@ -90,7 +91,9 @@ function Invoke-GraphGetWithRetry {
     while ($true) {
         try {
             Update-GraphToken
-            return Invoke-RestMethod -Method GET -Uri $Uri -Headers @{ Authorization = "Bearer $($script:Token.access_token)" }
+            # Pausa entre peticiones: Intune limita (429) si se le hacen cientos seguidas.
+            Start-Sleep -Milliseconds $script:PausaEntrePeticionesMs
+            return Invoke-RestMethod -Method GET -Uri $Uri -TimeoutSec 60 -Headers @{ Authorization = "Bearer $($script:Token.access_token)" }
         }
         catch {
             $Status = $null
@@ -103,7 +106,12 @@ function Invoke-GraphGetWithRetry {
                 throw
             }
 
-            $WaitSeconds = [Math]::Min([Math]::Pow(2, $Attempt), 30)
+            $WaitSeconds = [Math]::Min([Math]::Pow(2, $Attempt), 60)
+            if ($Status -eq 429) {
+                # Limitado: esperar más y frenar el ritmo del resto de peticiones.
+                $WaitSeconds = [Math]::Max($WaitSeconds, 20)
+                $script:PausaEntrePeticionesMs = [Math]::Min($script:PausaEntrePeticionesMs * 2, 2000)
+            }
             try {
                 $RetryAfter = $_.Exception.Response.Headers["Retry-After"]
                 if ($RetryAfter) { $WaitSeconds = [Math]::Min([int]$RetryAfter, 300) }
