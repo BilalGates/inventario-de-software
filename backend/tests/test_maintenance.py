@@ -45,3 +45,15 @@ def test_renormalize_reports_collisions(db):
     report = renormalize_software(db, "it@local", apply=True)
     assert report["collisions"] == [{"id": dup.id, "name": "Paint", "with": report["collisions"][0]["with"]}]
     assert db.get(SoftwareProduct, dup.id).publisher == DN  # no se fusiona solo
+
+
+def test_renormalize_after_merge_keeps_unique_key(db):
+    clean = _product(db, "NotepadPlusPlus", "NOTEPAD++")
+    clean.publisher_key = "notepad++"
+    used = _product(db, "NotepadPlusPlus", 'E=don.h@free.fr, CN="NOTEPAD++", O="NOTEPAD++", C=FR')
+    clean.merged_into_id = used.id  # fusión manual: el origen conserva su clave
+    db.commit()
+    report = renormalize_software(db, "it@local", apply=True)
+    assert report["collisions"] == [] and report["publisher"] == 1
+    assert db.get(SoftwareProduct, used.id).publisher == "NOTEPAD++"
+    assert renormalize_software(db, "it@local", apply=False)["publisher"] == 0  # idempotente

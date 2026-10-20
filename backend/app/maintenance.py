@@ -23,8 +23,11 @@ from app.services.normalization import classify, clean_publisher, publisher_key
 
 
 def renormalize_software(db: Session, actor: str, apply: bool) -> dict:
-    products = db.execute(select(SoftwareProduct).where(SoftwareProduct.merged_into_id.is_(None))).scalars().all()
-    taken = {(p.name_key, p.publisher_key): p.id for p in products}
+    every = db.execute(select(SoftwareProduct)).scalars().all()
+    products = [p for p in every if p.merged_into_id is None]
+    # La clave (nombre, editor) es única también entre productos fusionados: el origen la conserva
+    # para que las importaciones futuras se redirijan al destino.
+    taken = {(p.name_key, p.publisher_key): p for p in every}
     report = {"publisher": 0, "category": 0, "collisions": [], "examples": []}
     for p in products:
         # La categoría se calcula con el editor original: el sujeto de certificado es la señal de paquete.
@@ -34,10 +37,18 @@ def renormalize_software(db: Session, actor: str, apply: bool) -> dict:
             if apply:
                 p.category, p.is_relevant = new_cat, False
         new_pk = publisher_key(p.publisher)
-        if new_pk != p.publisher_key:
+        if new_pk != p.publisher_key and p.publisher != clean_publisher(p.publisher):
             other = taken.get((p.name_key, new_pk))
-            if other and other != p.id:
-                report["collisions"].append({"id": p.id, "name": p.name, "with": other})
+            if other is not None and other.merged_into_id == p.id:
+                if p.publisher == clean_publisher(p.publisher):
+                    continue  # ya corregido en una pasada anterior
+                # Ya fusionado en este: solo se corrige el editor visible; la clave limpia la tiene el
+                # origen y el resolutor de productos lo redirige aquí.
+                report["publisher"] += 1
+                if apply:
+                    p.publisher = clean_publisher(p.publisher)
+            elif other is not None and other.id != p.id:
+                report["collisions"].append({"id": p.id, "name": p.name, "with": other.id})
             else:
                 old_pk = p.publisher_key
                 if len(report["examples"]) < 10:
@@ -45,7 +56,7 @@ def renormalize_software(db: Session, actor: str, apply: bool) -> dict:
                 report["publisher"] += 1
                 if apply:
                     taken.pop((p.name_key, old_pk), None)
-                    taken[(p.name_key, new_pk)] = p.id
+                    taken[(p.name_key, new_pk)] = p
                     for alias in db.execute(select(SoftwareAlias).where(
                             SoftwareAlias.product_id == p.id, SoftwareAlias.raw_publisher_key == old_pk)).scalars():
                         alias.raw_publisher_key = new_pk
