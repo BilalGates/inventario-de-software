@@ -32,7 +32,8 @@ def utcnow() -> datetime:
 def make_engine(url: str) -> Engine:
     kwargs: dict = {"future": True, "pool_pre_ping": True}
     if url.startswith("sqlite"):
-        kwargs["connect_args"] = {"check_same_thread": False}
+        # timeout: espera al bloqueo en lugar de fallar enseguida ("database is locked").
+        kwargs["connect_args"] = {"check_same_thread": False, "timeout": 30}
     else:
         kwargs.update(pool_recycle=3600, pool_size=5, max_overflow=5)
     engine = create_engine(url, **kwargs)
@@ -40,6 +41,9 @@ def make_engine(url: str) -> Engine:
         @event.listens_for(engine, "connect")
         def _fk_on(dbapi_conn, _):  # pragma: no cover - trivial
             dbapi_conn.execute("PRAGMA foreign_keys=ON")
+            if ":memory:" not in url and "mode=memory" not in url:
+                # WAL: la web puede leer mientras el worker procesa una sincronización larga.
+                dbapi_conn.execute("PRAGMA journal_mode=WAL")
     return engine
 
 

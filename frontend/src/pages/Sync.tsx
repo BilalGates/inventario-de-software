@@ -1,16 +1,16 @@
-import { useQuery } from "@tanstack/react-query";
-import { FileUp, Play, RotateCcw } from "lucide-react";
-import { useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Copy, FileUp, LogIn, Play, RotateCcw } from "lucide-react";
+import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { RunStatusBadge } from "@/components/badges";
 import { DataTable, type Column } from "@/components/DataTable";
 import { UploadDialog } from "@/components/UploadDialog";
-import { Badge, Button, Card, DefinitionList, ErrorState, Modal, Notice, PageHeader, Spinner } from "@/components/ui";
+import { Badge, Button, Card, ConfirmDialog, DefinitionList, ErrorState, Modal, Notice, PageHeader, Spinner } from "@/components/ui";
 import { api } from "@/lib/api";
 import { useCan } from "@/lib/auth";
 import { CHANGE_LABEL, TRIGGER_LABEL, fmtDateTime, fmtRelative } from "@/lib/format";
 import { useAction, useUrlState } from "@/lib/hooks";
-import type { Paged, Run, Source } from "@/lib/types";
+import type { DeviceCodeStart, DeviceCodeStatus, Paged, Run, Source } from "@/lib/types";
 
 const STAT_LABEL: Record<string, string> = {
   devices_seen: "Dispositivos recibidos", devices_created: "Dispositivos nuevos", devices_matched: "Dispositivos conciliados",
@@ -37,9 +37,10 @@ export default function Sync() {
   const cols: Column<Run>[] = [
     { id: "id", header: "#", cell: (r) => <button className="font-mono text-xs text-accent hover:underline" onClick={() => setParams({ run: String(r.id) })}>{r.id}</button> },
     { id: "src", header: "Fuente", cell: (r) => <span className="font-medium">{r.source_name}</span> },
-    { id: "trg", header: "Origen", cell: (r) => <span className="text-muted">{TRIGGER_LABEL[r.trigger] ?? r.trigger}{r.filename && ` · ${r.filename}`}</span> },
+    { id: "trg", header: "Origen", cell: (r) => <span className="block max-w-72 truncate text-muted" title={r.filename ?? undefined}>{TRIGGER_LABEL[r.trigger] ?? r.trigger}{r.filename && ` · ${r.filename}`}</span> },
     { id: "st", header: "Estado", cell: (r) => <RunStatusBadge status={r.status} /> },
-    { id: "sum", header: "Resultado", cell: (r) => r.status === "failed" ? <span className="block max-w-80 truncate text-xs text-danger" title={r.error ?? ""}>{r.error}</span>
+    { id: "sum", header: "Resultado", cell: (r) => r.status === "running" && r.progress ? <span className="text-xs text-muted">{r.progress}</span>
+      : r.status === "failed" ? <span className="block max-w-80 truncate text-xs text-danger" title={r.error ?? ""}>{r.error}</span>
       : r.stats?.devices_seen != null ? <span className="text-xs text-muted">{String(r.stats.devices_seen)} disp. · {String(r.stats.installs_seen ?? 0)} inst. · {String(r.stats.changes ?? 0)} cambios</span> : "—" },
     { id: "by", header: "Solicitada por", cell: (r) => <span className="text-muted">{r.requested_by}</span> },
     { id: "at", header: "Fecha", cell: (r) => <span className="whitespace-nowrap text-muted" title={fmtDateTime(r.requested_at)}>{fmtRelative(r.requested_at)}</span> },
@@ -52,19 +53,21 @@ export default function Sync() {
         <div className="mb-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {sources.data!.filter((s) => s.code !== "legacy").map((s) => (
             <Card key={s.code} title={<span className="flex items-center gap-2">{s.name}
-              {!s.enabled && <Badge>Desactivada</Badge>}{s.kind === "api" && !s.configured && <Badge tone="warn">Sin credenciales</Badge>}</span>}>
+              {!s.enabled && <Badge>Desactivada</Badge>}{s.kind === "api" && !s.configured && <Badge tone="warn">Sin conectar</Badge>}</span>}>
               <DefinitionList items={[
                 ["Tipo", s.kind === "api" ? "API automática" : "Ficheros"], ["Prioridad", s.priority],
                 ["Última ejecución correcta", fmtRelative(s.last_success_at)],
-                ["Último estado", s.last_run ? <RunStatusBadge key="r" status={s.last_run.status} /> : "—"],
+                ["Último estado", s.last_run ? <span key="r" className="flex flex-wrap items-center gap-1.5"><RunStatusBadge status={s.last_run.status} />
+                  {s.last_run.progress && <span className="text-xs text-muted">{s.last_run.progress}</span>}</span> : "—"],
                 ["Dispositivos identificados", s.devices], ["Equipos con software", s.devices_with_software],
               ]} />
               {s.last_error && <p className="mt-3 line-clamp-3 text-xs text-danger" title={s.last_error}>{s.last_error}</p>}
+              {s.code === "intune" && <GraphConnection source={s} />}
               {can.write && s.enabled && (
                 <div className="mt-4 flex flex-wrap gap-2 border-t border-border pt-3">
                   {s.kind === "api" && <Button size="sm" variant="primary" icon={<Play className="size-3.5" />} disabled={!s.configured}
                     loading={start.isPending && start.variables === s.code} onClick={() => start.mutate(s.code)}
-                    title={s.configured ? undefined : "Configure las credenciales de Microsoft Graph"}>Sincronizar ahora</Button>}
+                    title={s.configured ? undefined : "Conecte con Microsoft para sincronizar"}>Sincronizar ahora</Button>}
                   <Button size="sm" icon={<FileUp className="size-3.5" />} onClick={() => setUpload(s.code as "panda" | "intune")}>
                     {s.code === "panda" ? "Importar exportación" : "Importar CSV"}</Button>
                 </div>
@@ -87,6 +90,62 @@ export default function Sync() {
         </>} />
       {upload && <UploadDialog source={upload} onClose={() => setUpload(null)} />}
       {runId && <RunDetail id={Number(runId)} onClose={() => { params.delete("run"); setParams(params); }} />}
+    </>
+  );
+}
+
+/** Sesión de Microsoft para Intune sin registro de aplicación: código de dispositivo iniciado desde la web. */
+function GraphConnection({ source }: { source: Source }) {
+  const can = useCan();
+  const qc = useQueryClient();
+  const [code, setCode] = useState<DeviceCodeStart | null>(null);
+  const [confirmOff, setConfirmOff] = useState(false);
+  const connect = useAction(() => api.send<DeviceCodeStart>("POST", "/sources/intune/connect"), { onSuccess: setCode });
+  const disconnect = useAction(() => api.send("DELETE", "/sources/intune/connect"), {
+    success: "Sesión de Microsoft desconectada", invalidate: [["sources"]], onSuccess: () => setConfirmOff(false),
+  });
+  const status = useQuery({
+    queryKey: ["intune-connect", code?.user_code], enabled: !!code,
+    queryFn: () => api.get<DeviceCodeStatus>("/sources/intune/connect"),
+    refetchInterval: (q) => (q.state.data && q.state.data.status !== "pending" ? false : Math.max(code?.interval ?? 5, 3) * 1000),
+  });
+  const st = status.data?.status;
+  useEffect(() => {
+    if (st === "connected") qc.invalidateQueries({ queryKey: ["sources"] });
+  }, [st, qc]);
+
+  if (source.graph_auth === "app") return <p className="mt-3 text-xs text-muted">Conectado con credenciales de aplicación.</p>;
+  return (
+    <>
+      {source.graph_auth === "delegated" ? (
+        <p className="mt-3 text-xs text-muted">Conectado como <span className="font-medium text-fg">{source.graph_account ?? "cuenta de Microsoft"}</span>
+          {can.admin && <> · <button className="text-accent hover:underline" onClick={() => setConfirmOff(true)}>Desconectar</button></>}</p>
+      ) : can.admin && (
+        <div className="mt-3"><Button size="sm" icon={<LogIn className="size-3.5" />} loading={connect.isPending}
+          onClick={() => connect.mutate(undefined)}>Conectar con Microsoft</Button></div>
+      )}
+      <Modal open={!!code} onClose={() => setCode(null)} title="Conectar con Microsoft"
+        footer={<Button onClick={() => setCode(null)}>{st === "connected" ? "Cerrar" : "Cancelar"}</Button>}>
+        {code && (st === "connected" ? (
+          <Notice tone="ok" title="Conectado">Sesión iniciada como {status.data?.account || "su cuenta"}. Intune se sincronizará solo según la programación; también puede pulsar «Sincronizar ahora».</Notice>
+        ) : st === "expired" || st === "error" ? (
+          <Notice tone="danger" title="No se pudo conectar">{status.data?.error ?? "El código ha caducado."} Cierre y vuelva a intentarlo.</Notice>
+        ) : (
+          <div className="space-y-3 text-sm">
+            <p>1. Abra <a className="text-accent hover:underline" href={code.verification_uri} target="_blank" rel="noreferrer">{code.verification_uri}</a></p>
+            <p>2. Escriba este código e inicie sesión con una cuenta con acceso a Intune:</p>
+            <div className="flex items-center gap-2">
+              <code className="rounded-md bg-subtle px-3 py-2 font-mono text-lg tracking-widest">{code.user_code}</code>
+              <Button size="sm" icon={<Copy className="size-3.5" />} onClick={() => navigator.clipboard?.writeText(code.user_code)}>Copiar</Button>
+            </div>
+            <Spinner label="Esperando a que complete el inicio de sesión…" />
+          </div>
+        ))}
+      </Modal>
+      <ConfirmDialog open={confirmOff} title="Desconectar de Microsoft" danger confirmLabel="Desconectar" busy={disconnect.isPending}
+        onConfirm={() => disconnect.mutate(undefined)} onClose={() => setConfirmOff(false)}>
+        Intune dejará de sincronizarse solo hasta que vuelva a conectar. Los datos ya importados se conservan.
+      </ConfirmDialog>
     </>
   );
 }

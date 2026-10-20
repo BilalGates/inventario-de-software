@@ -90,7 +90,7 @@ function Schedule({ data, sources, disabled }: { data: SettingsData["schedule.mo
 }
 
 function IntuneConfig({ src, disabled }: { src: Source; disabled: boolean }) {
-  const [strategy, setStrategy] = useState(String(src.config.software_strategy ?? "per_app"));
+  const [strategy, setStrategy] = useState(String(src.config.software_strategy ?? "per_device"));
   const [enabled, setEnabled] = useState(src.enabled);
   const save = useAction(() => api.send("PATCH", `/sources/${src.code}`, { enabled, config: { software_strategy: strategy } }),
     { success: "Conector actualizado", invalidate: [["sources"]] });
@@ -100,8 +100,8 @@ function IntuneConfig({ src, disabled }: { src: Source; disabled: boolean }) {
         <label className="flex items-center gap-2"><input type="checkbox" disabled={disabled} checked={enabled} onChange={(e) => setEnabled(e.target.checked)} className="accent-[rgb(var(--accent))]" />Conector activo</label>
         <Field label="Lectura de software (Discovered apps)" hint="«Por aplicación» es la técnica del script PowerShell actual. «Por dispositivo» hace menos llamadas; valídela con el tenant antes de usarla.">
           {(id) => <select id={id} className="field" disabled={disabled} value={strategy} onChange={(e) => setStrategy(e.target.value)}>
-            <option value="per_app">Por aplicación (detectedApps → managedDevices)</option>
-            <option value="per_device">Por dispositivo (managedDevices → detectedApps)</option>
+            <option value="per_app">Por aplicación (lento: una llamada por programa)</option>
+            <option value="per_device">Por dispositivo (rápido, recomendado)</option>
           </select>}
         </Field>
         <p className="text-xs text-muted">Permiso de aplicación necesario: DeviceManagementManagedDevices.Read.All (solo lectura).</p>

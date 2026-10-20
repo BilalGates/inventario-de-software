@@ -139,17 +139,28 @@ def export_devices(format: str = Query("xlsx", pattern="^(csv|xlsx)$"), q: str |
                    freshness: str | None = None, db: Session = Depends(get_db), user: CurrentUser = Reader):
     stale_days = get_settings().stale_device_days
     query = _filtered(q, status, department_id, device_type_id, freshness, None, stale_days).order_by(Device.hostname)
-    rows = [serialize(d, stale_days) for d in db.execute(query).scalars()]
+    extra = ("storage_free_bytes", "processor", "mac_wifi", "mac_ethernet", "ownership", "management_state",
+             "enrolled_at", "source_last_sync_at", "purchase_date")
+    rows = [serialize(d, stale_days, {k: getattr(d, k) for k in extra}) for d in db.execute(query).scalars()]
+    counts = dict(db.execute(select(SoftwareInstallation.device_id, func.count(func.distinct(SoftwareInstallation.product_id)))
+                             .where(SoftwareInstallation.present.is_(True))
+                             .group_by(SoftwareInstallation.device_id)).all())
     for r in rows:
         r["ram_gb"] = round(r["ram_bytes"] / 1024**3, 1) if r["ram_bytes"] else None
         r["storage_gb"] = round(r["storage_total_bytes"] / 1000**3) if r["storage_total_bytes"] else None
+        r["storage_free_gb"] = round(r["storage_free_bytes"] / 1000**3) if r["storage_free_bytes"] else None
+        r["software_count"] = counts.get(r["id"], 0)
     audit.record(db, user.upn, "export.devices", "device", None, f"Exportación de {len(rows)} dispositivos ({format})")
     db.commit()
     cols = [("name", "Equipo"), ("serial_number", "Nº serie"), ("device_type", "Tipo"), ("manufacturer", "Fabricante"),
             ("model", "Modelo"), ("os_name", "SO"), ("os_version", "Versión SO"), ("department", "Departamento"),
             ("primary_user", "Usuario"), ("primary_user_upn", "UPN"), ("status", "Estado"),
             ("freshness", "Actualidad"), ("compliance_state", "Cumplimiento"), ("encrypted", "Cifrado"),
-            ("ram_gb", "RAM (GB)"), ("storage_gb", "Disco (GB)"), ("location", "Ubicación"),
+            ("ram_gb", "RAM (GB)"), ("storage_gb", "Disco (GB)"), ("storage_free_gb", "Disco libre (GB)"),
+            ("processor", "Procesador"), ("mac_wifi", "MAC Wi-Fi"), ("mac_ethernet", "MAC Ethernet"),
+            ("ownership", "Propiedad"), ("management_state", "Gestión"), ("enrolled_at", "Inscripción"),
+            ("source_last_sync_at", "Último check-in (fuente)"), ("software_count", "Programas"),
+            ("location", "Ubicación"), ("purchase_date", "Fecha de compra"),
             ("last_seen_at", "Última observación"), ("last_seen_source", "Fuente")]
     return export_response(rows, cols, f"dispositivos_{utcnow():%Y%m%d}", format)
 

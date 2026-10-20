@@ -65,14 +65,24 @@ class SyncEngine:
         run.status, run.started_at, run.log = "running", utcnow(), []
         db.commit()
         lines: list[str] = []
+        extracting = False
 
         def log(msg: str) -> None:
             lines.append(f"{utcnow().isoformat(timespec='seconds')} {msg}")
+            # Durante la extracción no hay cambios pendientes en la sesión: se publica el progreso
+            # para que la web lo muestre. En el procesado no, para no romper su atomicidad.
+            if extracting:
+                run.log = lines[-500:]
+                db.commit()
 
         params = dict(run.params or {})
         try:
             connector = self.connector_factory(source, params)
-            result = connector.extract(params, log)
+            extracting = True
+            try:
+                result = connector.extract(params, log)
+            finally:
+                extracting = False
             self._validate(result)
             stats = self.process(run, source, result, log)
             run.stats = {**(run.stats or {}), **result.stats, **stats}

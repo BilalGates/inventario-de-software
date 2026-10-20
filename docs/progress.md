@@ -37,7 +37,6 @@ Rama: `feature/inventario-2.0`. Última actualización: 2026-10-15.
 
 | Tarea | Falta |
 |---|---|
-| Validar Intune real (cifras, estrategia `per_app`/`per_device`, RAM) | Registro de aplicación + permiso `DeviceManagementManagedDevices.Read.All` + credencial |
 | Validar cifras con un CSV real del script | Ejecutar el script una vez con el servicio instalado (se importa solo) |
 | Conector API de Panda/WatchGuard | Confirmar licencia de API y credenciales |
 | Migrar datos reales | Simulación `--dry-run` contra la BD MySQL actual con usuario de solo lectura |

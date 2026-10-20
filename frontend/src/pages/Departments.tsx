@@ -1,4 +1,4 @@
-import { Plus } from "lucide-react";
+import { Download, Plus } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Badge, Button, EmptyState, ErrorState, Field, Modal, PageHeader, Spinner } from "@/components/ui";
@@ -21,7 +21,10 @@ export default function Departments() {
   return (
     <>
       <PageHeader title="Departamentos" description="Estructura organizativa. Independiente del tipo de hardware y del catálogo de software."
-        actions={can.write && <Button variant="primary" icon={<Plus className="size-4" />} onClick={() => setEditing("new")}>Nuevo departamento</Button>} />
+        actions={<>
+          <Button icon={<Download className="size-4" />} onClick={() => api.download("/users/export", { format: "xlsx" })}>Exportar usuarios</Button>
+          {can.write && <Button variant="primary" icon={<Plus className="size-4" />} onClick={() => setEditing("new")}>Nuevo departamento</Button>}
+        </>} />
       {inactive > 0 && (
         <label className="mb-3 flex items-center gap-2 text-sm text-muted">
           <input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} className="accent-[rgb(var(--accent))]" />

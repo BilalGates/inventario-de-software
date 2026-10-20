@@ -56,11 +56,19 @@ class FakeGraph:
             return httpx.Response(200, json={"access_token": "tok", "expires_in": 3600})
         if (injected := self.fail(request)) is not None:
             return injected
-        path = request.url.path.removeprefix("/v1.0")
+        path = request.url.path.removeprefix("/v1.0").removeprefix("/beta")
         if path == "/deviceManagement/managedDevices":
             return self._page(self.devices, request)
         if path.startswith("/deviceManagement/managedDevices/") and path.count("/") == 3:
             dev_id = path.rsplit("/", 1)[1]
+            if request.url.params.get("$expand") == "detectedApps":
+                # Como el beta real: sin editor y con paquetes del sistema que no están en el catálogo.
+                # Además, con otro id que el catálogo (como hace Graph con la mayoría de apps).
+                apps = [{**{k: v for k, v in a.items() if not k.startswith("_")}, "id": f"beta-{a['id']}",
+                         "publisher": None} for a in self.apps if dev_id in a["_devices"]]
+                if apps:
+                    apps.append({"id": "pkg-sistema", "displayName": "Microsoft.WindowsStore", "publisher": None})
+                return httpx.Response(200, json={"id": dev_id, "detectedApps": apps})
             return httpx.Response(200, json={"id": dev_id, "physicalMemoryInBytes": 16 * 1024**3})
         if path == "/deviceManagement/detectedApps":
             return self._page(self.apps, request)

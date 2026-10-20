@@ -294,3 +294,21 @@ def test_local_mode_rejects_remote_clients():
     with pytest.raises(HTTPException) as err:
         get_current_user(remote, db=None, settings=s)
     assert err.value.status_code == 403
+
+
+def test_user_export_lists_assigned_devices(client, engine):
+    from sqlalchemy.orm import Session
+
+    from app.models import User
+    with Session(engine) as db:
+        u = User(upn="ana@asserta.test", display_name="Ana", source="intune")
+        db.add(u)
+        db.flush()
+        db.add_all([Device(hostname="PC-A", serial_number="S1", manufacturer="Dell", model="7350", primary_user_id=u.id),
+                    Device(hostname="PC-B", primary_user_id=u.id)])
+        db.commit()
+    csv_text = client.get("/api/users/export", params={"format": "csv"}).content.decode("utf-8-sig")
+    line = next(row for row in csv_text.splitlines() if "ana@asserta.test" in row)
+    assert "PC-A, PC-B" in line and "Dell 7350" in line and "S1" in line
+    devices_csv = client.get("/api/devices/export", params={"format": "csv"}).content.decode("utf-8-sig")
+    assert "MAC Wi-Fi" in devices_csv.splitlines()[0] and "Programas" in devices_csv.splitlines()[0]

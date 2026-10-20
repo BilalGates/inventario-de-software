@@ -46,6 +46,9 @@ class Settings(BaseSettings):
     graph_certificate_thumbprint: str = ""
     graph_base_url: str = "https://graph.microsoft.com"
     graph_max_retries: int = 5
+    # Alternativa sin registro de aplicación: sesión de usuario iniciada desde la web (código de
+    # dispositivo). Fichero con el refresh token cifrado; vacío = %LOCALAPPDATA%\InventarioAsserta.
+    graph_token_file: str = ""
 
     # Carpeta supervisada para exportaciones de Panda (contingencia sin API)
     panda_drop_dir: str = ""
@@ -75,12 +78,30 @@ class Settings(BaseSettings):
         return self
 
     @property
-    def graph_configured(self) -> bool:
+    def graph_app_configured(self) -> bool:
         return bool(
             self.graph_tenant_id
             and self.graph_client_id
             and (self.graph_client_secret or self.graph_certificate_path)
         )
+
+    @property
+    def graph_token_path(self) -> Path | None:
+        if self.graph_token_file:
+            return Path(self.graph_token_file)
+        if self.environment == "test" or not os.environ.get("LOCALAPPDATA"):
+            return None
+        return Path(os.environ["LOCALAPPDATA"]) / "InventarioAsserta" / "graph_token.bin"
+
+    @property
+    def graph_delegated_connected(self) -> bool:
+        path = self.graph_token_path
+        return bool(path and path.is_file())
+
+    @property
+    def graph_configured(self) -> bool:
+        """Credenciales de aplicación (prioritarias) o sesión de usuario iniciada desde la web."""
+        return self.graph_app_configured or self.graph_delegated_connected
 
 
 # Configuración del servicio de Windows (fuera del repositorio, solo legible por administradores).

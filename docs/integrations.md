@@ -2,10 +2,23 @@
 
 ## Microsoft Intune (Microsoft Graph)
 
-**Estado: implementado y probado con respuestas simuladas. Bloqueado para validación real**
-hasta disponer de un registro de aplicación en Entra ID con permisos concedidos.
+Dos formas de autenticarse; si hay credenciales de aplicación, tienen prioridad.
 
-### Qué falta para activarlo
+### Opción A: sesión de usuario desde la web (sin registro de aplicación)
+
+*Sincronización › Microsoft Intune › Conectar con Microsoft* (rol administrador) muestra un código
+de dispositivo; se introduce en https://microsoft.com/devicelogin con una cuenta con acceso a
+Intune. Usa el cliente público "Microsoft Graph Command Line Tools" (el mismo que el script
+PowerShell) con el permiso delegado `DeviceManagementManagedDevices.Read.All`.
+
+- El refresh token se guarda cifrado con DPAPI en `%LOCALAPPDATA%\InventarioAsserta\graph_token.bin`
+  (o `INV_GRAPH_TOKEN_FILE`): solo lo descifra el mismo usuario de Windows en este equipo.
+- Se renueva solo en cada sincronización (Entra rota el refresh token y se guarda el nuevo).
+- Si caduca por inactividad o por políticas de acceso condicional, la ejecución falla con
+  "La sesión de Microsoft ha caducado" y hay que volver a conectar.
+- *Desconectar* borra el token; los datos importados se conservan. Ambos pasos quedan en auditoría.
+
+### Opción B: registro de aplicación (credenciales de aplicación)
 
 1. Registro de aplicación en Entra ID (p. ej. "Inventario Asserta – Graph").
 2. Permiso de **aplicación** `DeviceManagementManagedDevices.Read.All` con consentimiento de
@@ -29,10 +42,15 @@ hasta disponer de un registro de aplicación en Entra ID con permisos concedidos
 - RAM: la lista devuelve 0, así que se pide por dispositivo (`$select=physicalMemoryInBytes`). Si
   falla no es esencial (aviso).
 - Software — **Discovered apps** (`/deviceManagement/detectedApps`), dos estrategias:
-  - `per_app` (por defecto): lista apps y, por cada una, `…/detectedApps/{id}/managedDevices`.
-    Es la técnica habitual de los scripts PowerShell de inventario.
-  - `per_device`: `…/managedDevices/{id}/detectedApps`. Menos llamadas y completitud por equipo;
-    **pendiente de validar** que el tenant la rellena.
+  - `per_device` (por defecto): `beta/…/managedDevices/{id}?$expand=detectedApps`, una llamada
+    por equipo. Validado en el tenant el 2026-10-19: 29 equipos en ~11 s, sin limitaciones.
+    En v1.0 la ruta `…/managedDevices/{id}/detectedApps` responde 400. Un equipo que devuelve la
+    lista vacía no se marca completo (no se infieren bajas en él).
+  - `per_app`: lista apps (descarta `deviceCount = 0`) y, por cada una,
+    `…/detectedApps/{id}/managedDevices`. Técnica del script PowerShell; con ~1100 apps tarda
+    ~24 min por las limitaciones (429) de Intune. `$batch` no ayuda: Intune limita cada
+    sub-petición (probado: 4075 limitaciones y extracción parcial).
+  - El progreso de la extracción se publica en el registro de la ejecución mientras corre.
 
 ### Discovered Apps vs. App Inventory
 
