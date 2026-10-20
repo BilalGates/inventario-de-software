@@ -29,8 +29,7 @@ Rama: `feature/inventario-2.0`. Última actualización: 2026-10-15.
 | Backend `ruff` | sin errores |
 | Frontend `vitest` | 12 pruebas OK · `tsc` sin errores · build OK |
 | E2E Playwright | 3 flujos OK contra API + worker reales (departamento → dispositivo → Panda → autorización → alerta → inventario mensual → verificación de auditoría; movimiento masivo; Intune sin credenciales) |
-| Legacy `pytest` (app de escritorio) | 60 pruebas OK |
-| CI | `.github/workflows/ci.yml`: legacy, backend y frontend+E2E (pendiente de su primera ejecución en GitHub) |
+| CI | `.github/workflows/ci.yml`: backend y frontend+E2E (pendiente de su primera ejecución en GitHub) |
 
 **Instalado y verificado en el equipo de IT (2026-10-16):** arranque automático por tarea programada en http://127.0.0.1:8180; interfaz, API y reinicio automático comprobados.
 
@@ -38,7 +37,6 @@ Rama: `feature/inventario-2.0`. Última actualización: 2026-10-15.
 
 | Tarea | Falta |
 |---|---|
-| Validar Intune real (cifras, estrategia `per_app`/`per_device`, RAM) | Registro de aplicación + permiso `DeviceManagementManagedDevices.Read.All` + credencial |
 | Validar cifras con un CSV real del script | Ejecutar el script una vez con el servicio instalado (se importa solo) |
 | Conector API de Panda/WatchGuard | Confirmar licencia de API y credenciales |
 | Migrar datos reales | Simulación `--dry-run` contra la BD MySQL actual con usuario de solo lectura |
@@ -48,5 +46,4 @@ Rama: `feature/inventario-2.0`. Última actualización: 2026-10-15.
 
 ## Pendiente (siguiente iteración)
 
-- Retirar la aplicación de escritorio cuando la migración real esté validada.
 - Mejoras: vista de versiones desplegadas por producto en el panel, informes programados por correo, P2 (licencias, garantías, Jira Assets).

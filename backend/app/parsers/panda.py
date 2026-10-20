@@ -7,8 +7,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any
 
-from utils.normalizer import clean_version, normalize_nombre
-
+from app.parsers.normalizer import clean_version, normalize_nombre
 
 FIELD_COUNT = 5
 

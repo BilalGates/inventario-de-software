@@ -104,3 +104,24 @@ def test_per_device_strategy():
     fake = FakeGraph([device(1), device(2)], APPS)
     result = IntuneConnector(fake.client()).extract({"software_strategy": "per_device"}, lambda m: None)
     assert result.complete and len(result.installs) == 4
+
+
+def test_per_app_skips_apps_without_devices_and_reports_progress():
+    fake = FakeGraph([device(1), device(2)], {"A|x|1": ["intune-1"], "B|x|1": ["intune-2"], "C|x|1": []})
+    fake.apps[2]["deviceCount"] = 0
+    logs = []
+    result = IntuneConnector(fake.client()).extract({"fetch_hardware_details": False}, logs.append)
+    assert len(result.installs) == 2 and result.complete
+    assert not any(c.endswith("/app-2/managedDevices") for c in fake.calls)  # sin dispositivos: no se consulta
+    assert any("aplicaciones 2/2" in m for m in logs)
+
+
+def test_per_device_does_not_trust_empty_lists():
+    fake = FakeGraph([device(1), device(2)], {"A|x|1": ["intune-1"]})
+    result = IntuneConnector(fake.client()).extract({"software_strategy": "per_device",
+                                                      "fetch_hardware_details": False}, lambda m: None)
+    assert len(result.installs) == 1
+    assert result.software_complete_for == {"intune-1"}  # el equipo vacío no permite inferir bajas
+    assert result.installs[0].publisher == "x"  # el editor sale del catálogo, no del $expand de beta
+    assert all(i.source_app_id != "pkg-sistema" for i in result.installs)
+    assert sum(c.startswith("GET /beta/deviceManagement/managedDevices/") for c in fake.calls) == 2  # una por equipo

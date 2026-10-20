@@ -141,6 +141,8 @@ export interface Run {
   source_name: string;
   trigger: string;
   status: "queued" | "running" | "succeeded" | "partial" | "failed" | "cancelled";
+  /** Última línea del registro mientras se ejecuta. */
+  progress?: string;
   is_complete: boolean;
   requested_by: string | null;
   requested_at: string;
@@ -171,6 +173,22 @@ export interface Source {
   devices: number;
   devices_with_software: number;
   watch_folder: boolean | null;
+  /** Solo Intune: "app" (credenciales INV_GRAPH_*), "delegated" (sesión iniciada desde la web) o null. */
+  graph_auth?: "app" | "delegated" | null;
+  graph_account?: string | null;
+}
+
+export interface DeviceCodeStart {
+  user_code: string;
+  verification_uri: string;
+  expires_in: number;
+  interval: number;
+}
+
+export interface DeviceCodeStatus {
+  status: "idle" | "pending" | "connected" | "expired" | "error";
+  account?: string;
+  error?: string;
 }
 
 export interface Change {

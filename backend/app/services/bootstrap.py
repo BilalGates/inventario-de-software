@@ -38,7 +38,7 @@ def ensure_reference_data(db: Session) -> None:
     for code, name, kind, priority in SOURCES:
         if code not in existing_sources:
             db.add(InventorySource(code=code, name=name, kind=kind, priority=priority, enabled=code != "legacy",
-                                   config={"software_strategy": "per_app", "api_version": "v1.0"}
+                                   config={"software_strategy": "per_device", "api_version": "v1.0"}
                                    if code == "intune" else {}))
     for key, value in DEFAULT_SETTINGS.items():
         if db.get(AppSetting, key) is None:

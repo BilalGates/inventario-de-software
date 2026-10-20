@@ -1,7 +1,7 @@
 """Tests de normalización de nombres y de versiones-como-texto (FASE 6)."""
 import pytest
 
-from utils.normalizer import clean_version, normalize_nombre, version_changed
+from app.parsers.normalizer import clean_version, normalize_nombre, version_changed
 
 
 class TestNormalizeNombre:

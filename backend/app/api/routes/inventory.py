@@ -13,7 +13,9 @@ from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from app.api.common import Page, _csv_safe, export_response, not_found, paginate
+from app.connectors.base import ConnectorError
 from app.connectors.files import decode
+from app.connectors.graph_delegated import DeviceCodeLogin, TokenStore
 from app.core.config import get_settings
 from app.core.security import Admin, CurrentUser, Reader, Technician
 from app.db import get_db, utcnow
@@ -49,6 +51,8 @@ def _run(r: InventoryRun, full: bool = False) -> dict:
             "requested_at": r.requested_at, "started_at": r.started_at, "finished_at": r.finished_at,
             "attempt": r.attempt, "retry_of_id": r.retry_of_id, "period": r.period, "error": r.error,
             "stats": r.stats or {}, "filename": (r.params or {}).get("filename")}
+    if r.status == "running" and r.log:
+        data["progress"] = r.log[-1].split(" ", 1)[-1]  # última línea, sin la marca de tiempo
     if full:
         data["log"] = r.log or []
         data["params"] = {k: v for k, v in (r.params or {}).items() if k != "content"}
@@ -144,13 +148,71 @@ def list_sources(db: Session = Depends(get_db), _: CurrentUser = Reader):
                                 .where(SoftwareInstallation.source == src.code,
                                        SoftwareInstallation.present.is_(True))).scalar() or 0
         configured = s.graph_configured if src.code == "intune" else True
-        out.append({"id": src.id, "code": src.code, "name": src.name, "kind": src.kind, "enabled": src.enabled,
+        extra = _graph_status() if src.code == "intune" else {}
+        out.append({**extra,"id": src.id, "code": src.code, "name": src.name, "kind": src.kind, "enabled": src.enabled,
                     "priority": src.priority, "config": src.config or {}, "configured": configured,
                     "last_success_at": src.last_success_at, "last_error": src.last_error,
                     "last_run": _run(last) if last else None, "devices": devices,
                     "devices_with_software": devices_sw,
                     "watch_folder": bool(s.panda_drop_dir) if src.code == "panda" else None})
     return out
+
+
+def _graph_status() -> dict:
+    s = get_settings()
+    if s.graph_app_configured:
+        return {"graph_auth": "app", "graph_account": None}
+    if s.graph_delegated_connected:
+        saved = TokenStore(s.graph_token_path).load() or {}
+        return {"graph_auth": "delegated", "graph_account": saved.get("account") or None}
+    return {"graph_auth": None, "graph_account": None}
+
+
+_device_login: DeviceCodeLogin | None = None
+
+
+def _login() -> DeviceCodeLogin:
+    global _device_login
+    path = get_settings().graph_token_path
+    if path is None:
+        raise HTTPException(409, "No hay ubicación para guardar la sesión (INV_GRAPH_TOKEN_FILE).")
+    if _device_login is None or _device_login.store.path != path:
+        _device_login = DeviceCodeLogin(TokenStore(path))
+    return _device_login
+
+
+@router.post("/sources/intune/connect")
+def intune_connect(_: CurrentUser = Admin):
+    """Inicia sesión con código de dispositivo: el usuario lo introduce en microsoft.com/devicelogin."""
+    if get_settings().graph_app_configured:
+        raise HTTPException(409, "Intune ya usa credenciales de aplicación (INV_GRAPH_*).")
+    try:
+        return _login().start()
+    except ConnectorError as exc:
+        raise HTTPException(502, str(exc)) from exc
+
+
+@router.get("/sources/intune/connect")
+def intune_connect_status(db: Session = Depends(get_db), user: CurrentUser = Admin):
+    try:
+        result = _login().poll()
+    except ConnectorError as exc:
+        raise HTTPException(502, str(exc)) from exc
+    if result["status"] == "connected":
+        audit.record(db, user.upn, "source.connect", "inventory_source", None, "Microsoft Intune",
+                     after={"account": result.get("account")})
+        db.commit()
+    return result
+
+
+@router.delete("/sources/intune/connect")
+def intune_disconnect(db: Session = Depends(get_db), user: CurrentUser = Admin):
+    path = get_settings().graph_token_path
+    if path:
+        TokenStore(path).delete()
+    audit.record(db, user.upn, "source.disconnect", "inventory_source", None, "Microsoft Intune")
+    db.commit()
+    return {"ok": True}
 
 
 class SourcePatch(BaseModel):
@@ -168,7 +230,7 @@ def update_source(code: str, body: SourcePatch, db: Session = Depends(get_db), u
         allowed = {"software_strategy", "api_version", "fetch_hardware_details"}
         if set(body.config) - allowed:
             raise HTTPException(422, f"Claves permitidas: {sorted(allowed)}. Los secretos van en variables de entorno.")
-        if body.config.get("software_strategy", "per_app") not in ("per_app", "per_device"):
+        if body.config.get("software_strategy", "per_device") not in ("per_app", "per_device"):
             raise HTTPException(422, "software_strategy debe ser per_app o per_device")
         if body.config.get("api_version", "v1.0") not in ("v1.0", "beta"):
             raise HTTPException(422, "api_version debe ser v1.0 o beta")

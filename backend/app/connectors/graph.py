@@ -36,8 +36,11 @@ class GraphClient:
         max_retries: int = 5,
         http: httpx.Client | None = None,
         sleep: Callable[[float], None] = time.sleep,
+        token_provider: Callable[[bool], str] | None = None,
     ):
-        if not tenant_id or not client_id or not (client_secret or certificate_path):
+        # token_provider: acceso delegado (sesión de usuario); sustituye a las credenciales de aplicación.
+        self._token_provider = token_provider
+        if not token_provider and (not tenant_id or not client_id or not (client_secret or certificate_path)):
             raise ConnectorError("Credenciales de Microsoft Graph no configuradas.", kind="config")
         self.tenant_id = tenant_id
         self.client_id = client_id
@@ -71,6 +74,10 @@ class GraphClient:
         return jwt.encode(claims, pem, algorithm="RS256", headers=headers)
 
     def _get_token(self) -> str:
+        if self._token_provider:
+            force = self._token is None  # tras un 401 se fuerza la renovación
+            self._token = self._token_provider(force)
+            return self._token
         if self._token and time.time() < self._token_exp - 120:
             return self._token
         data = {

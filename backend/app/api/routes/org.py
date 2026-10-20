@@ -3,14 +3,14 @@ from __future__ import annotations
 
 import re
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.api.common import not_found
+from app.api.common import export_response, not_found
 from app.core.security import Admin, CurrentUser, Reader, Technician
-from app.db import get_db
+from app.db import get_db, utcnow
 from app.models import (
     AuditEvent,
     Department,
@@ -184,6 +184,36 @@ def list_users(q: str | None = None, app_only: bool = False, db: Session = Depen
              "department": u.department.name if u.department else None, "role": u.role, "active": u.active,
              "source": u.source, "last_login_at": u.last_login_at, "devices": counts.get(u.id, 0)}
             for u in db.execute(query.limit(1000)).scalars()]
+
+
+@router.get("/users/export")
+def export_users(format: str = Query("xlsx", pattern="^(csv|xlsx)$"), db: Session = Depends(get_db),
+                 user: CurrentUser = Reader):
+    """Usuarios con sus equipos asignados (usuario principal), uno por fila de usuario."""
+    devices: dict[int, list[Device]] = {}
+    for d in db.execute(select(Device).where(Device.status != "retired", Device.primary_user_id.is_not(None))
+                        .order_by(Device.hostname)).scalars():
+        devices.setdefault(d.primary_user_id, []).append(d)
+    rows = []
+    for u in db.execute(select(User).order_by(User.display_name, User.upn)).scalars():
+        own = devices.get(u.id, [])
+        rows.append({
+            # Sin departamento propio se usa el de sus equipos (es lo habitual con datos de Intune).
+            "display_name": u.display_name, "upn": u.upn,
+            "department": u.department.name if u.department else
+            ", ".join(sorted({d.department.name for d in own if d.department})) or None,
+            "active": u.active, "source": u.source, "devices": len(own),
+            "device_names": ", ".join(d.display_name or "" for d in own),
+            "models": ", ".join(sorted({f"{d.manufacturer or ''} {d.model or ''}".strip() for d in own} - {""})),
+            "serials": ", ".join(d.serial_number for d in own if d.serial_number),
+            "last_seen_at": max((d.last_seen_at for d in own if d.last_seen_at), default=None),
+        })
+    audit.record(db, user.upn, "export.users", "user", None, f"Exportación de {len(rows)} usuarios ({format})")
+    db.commit()
+    cols = [("display_name", "Usuario"), ("upn", "UPN"), ("department", "Departamento"), ("active", "Activo"),
+            ("devices", "Nº equipos"), ("device_names", "Equipos"), ("models", "Modelos"), ("serials", "Nº serie"),
+            ("last_seen_at", "Última observación de sus equipos"), ("source", "Origen")]
+    return export_response(rows, cols, f"usuarios_{utcnow():%Y%m%d}", format)
 
 
 class UserPatch(BaseModel):
