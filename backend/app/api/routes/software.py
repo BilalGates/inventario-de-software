@@ -1,14 +1,19 @@
 """Catálogo de software, versiones, instalaciones, alias, fusiones y políticas de autorización."""
 from __future__ import annotations
 
+import io
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.api.common import Page, export_response, not_found, paginate
+from app.api.routes.devices import DEVICE_EXPORT_COLUMNS, device_export_rows
+from app.api.software_report import build_workbook
+from app.core.config import get_settings
 from app.core.security import CurrentUser, Reader, Technician
 from app.db import get_db, utcnow
 from app.models import (
@@ -110,6 +115,8 @@ def export_products(format: str = Query("xlsx", pattern="^(csv|xlsx)$"), q: str 
     query = _catalog_query(q, status, category, relevant, department_id, None, None, None,
                            True if department_id else None).order_by(SoftwareProduct.name)
     products = db.execute(query).scalars().all()
+    if format == "xlsx":
+        return _department_workbook(db, user, products, department_id)
     counts = _counts(db, [p.id for p in products])
     versions: dict[int, list[str]] = {}
     for pid, ver in db.execute(select(SoftwareInstallation.product_id, SoftwareVersion.version).join(
@@ -125,6 +132,23 @@ def export_products(format: str = Query("xlsx", pattern="^(csv|xlsx)$"), q: str 
                                   ("version_list", "Versiones"), ("ens_classification", "Clasificación ENS"),
                                   ("first_seen_at", "Primera detección"), ("last_seen_at", "Última detección"),
                                   ("notes", "Notas")], f"software_{utcnow():%Y%m%d}", format)
+
+
+def _department_workbook(db: Session, user, products: list[SoftwareProduct], department_id: int | None):
+    """Excel: una hoja por departamento con el recuento de equipos por programa e inventario de equipos."""
+    stale_days = get_settings().stale_device_days
+    devices = select(Device).where(Device.status != "retired").order_by(Device.hostname)
+    if department_id:
+        devices = devices.where(Device.department_id == department_id)
+    device_rows = device_export_rows(db, devices, stale_days)
+    content = build_workbook(db, {p.id for p in products}, department_id, device_rows, DEVICE_EXPORT_COLUMNS,
+                             f"{utcnow():%d/%m/%Y %H:%M} UTC")
+    audit.record(db, user.upn, "export.software", "software_product", None,
+                 f"Exportación por departamento de {len(products)} productos y {len(device_rows)} equipos")
+    db.commit()
+    return StreamingResponse(io.BytesIO(content),
+                             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                             headers={"Content-Disposition": f'attachment; filename="software_por_departamento_{utcnow():%Y%m%d}.xlsx"'})
 
 
 @router.get("/meta")

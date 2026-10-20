@@ -133,12 +133,22 @@ def list_devices(page: Page = Depends(), q: str | None = None, status: str | Non
                                                                 "sources": sources.get(d.id, [])}) for d in devices]}
 
 
-@router.get("/export")
-def export_devices(format: str = Query("xlsx", pattern="^(csv|xlsx)$"), q: str | None = None,
-                   status: str | None = None, department_id: int | None = None, device_type_id: int | None = None,
-                   freshness: str | None = None, db: Session = Depends(get_db), user: CurrentUser = Reader):
-    stale_days = get_settings().stale_device_days
-    query = _filtered(q, status, department_id, device_type_id, freshness, None, stale_days).order_by(Device.hostname)
+DEVICE_EXPORT_COLUMNS = [
+    ("name", "Equipo"), ("serial_number", "Nº serie"), ("device_type", "Tipo"), ("manufacturer", "Fabricante"),
+    ("model", "Modelo"), ("os_name", "SO"), ("os_version", "Versión SO"), ("department", "Departamento"),
+    ("primary_user", "Usuario"), ("primary_user_upn", "UPN"), ("status", "Estado"),
+    ("freshness", "Actualidad"), ("compliance_state", "Cumplimiento"), ("encrypted", "Cifrado"),
+    ("ram_gb", "RAM (GB)"), ("storage_gb", "Disco (GB)"), ("storage_free_gb", "Disco libre (GB)"),
+    ("processor", "Procesador"), ("mac_wifi", "MAC Wi-Fi"), ("mac_ethernet", "MAC Ethernet"),
+    ("ownership", "Propiedad"), ("management_state", "Gestión"), ("enrolled_at", "Inscripción"),
+    ("source_last_sync_at", "Último check-in (fuente)"), ("software_count", "Programas"),
+    ("location", "Ubicación"), ("purchase_date", "Fecha de compra"),
+    ("last_seen_at", "Última observación"), ("last_seen_source", "Fuente"),
+]
+
+
+def device_export_rows(db: Session, query, stale_days: int) -> list[dict]:
+    """Filas de la exportación de equipos (también la última hoja del Excel de software)."""
     extra = ("storage_free_bytes", "processor", "mac_wifi", "mac_ethernet", "ownership", "management_state",
              "enrolled_at", "source_last_sync_at", "purchase_date")
     rows = [serialize(d, stale_days, {k: getattr(d, k) for k in extra}) for d in db.execute(query).scalars()]
@@ -150,19 +160,19 @@ def export_devices(format: str = Query("xlsx", pattern="^(csv|xlsx)$"), q: str |
         r["storage_gb"] = round(r["storage_total_bytes"] / 1000**3) if r["storage_total_bytes"] else None
         r["storage_free_gb"] = round(r["storage_free_bytes"] / 1000**3) if r["storage_free_bytes"] else None
         r["software_count"] = counts.get(r["id"], 0)
+    return rows
+
+
+@router.get("/export")
+def export_devices(format: str = Query("xlsx", pattern="^(csv|xlsx)$"), q: str | None = None,
+                   status: str | None = None, department_id: int | None = None, device_type_id: int | None = None,
+                   freshness: str | None = None, db: Session = Depends(get_db), user: CurrentUser = Reader):
+    stale_days = get_settings().stale_device_days
+    query = _filtered(q, status, department_id, device_type_id, freshness, None, stale_days).order_by(Device.hostname)
+    rows = device_export_rows(db, query, stale_days)
     audit.record(db, user.upn, "export.devices", "device", None, f"Exportación de {len(rows)} dispositivos ({format})")
     db.commit()
-    cols = [("name", "Equipo"), ("serial_number", "Nº serie"), ("device_type", "Tipo"), ("manufacturer", "Fabricante"),
-            ("model", "Modelo"), ("os_name", "SO"), ("os_version", "Versión SO"), ("department", "Departamento"),
-            ("primary_user", "Usuario"), ("primary_user_upn", "UPN"), ("status", "Estado"),
-            ("freshness", "Actualidad"), ("compliance_state", "Cumplimiento"), ("encrypted", "Cifrado"),
-            ("ram_gb", "RAM (GB)"), ("storage_gb", "Disco (GB)"), ("storage_free_gb", "Disco libre (GB)"),
-            ("processor", "Procesador"), ("mac_wifi", "MAC Wi-Fi"), ("mac_ethernet", "MAC Ethernet"),
-            ("ownership", "Propiedad"), ("management_state", "Gestión"), ("enrolled_at", "Inscripción"),
-            ("source_last_sync_at", "Último check-in (fuente)"), ("software_count", "Programas"),
-            ("location", "Ubicación"), ("purchase_date", "Fecha de compra"),
-            ("last_seen_at", "Última observación"), ("last_seen_source", "Fuente")]
-    return export_response(rows, cols, f"dispositivos_{utcnow():%Y%m%d}", format)
+    return export_response(rows, DEVICE_EXPORT_COLUMNS, f"dispositivos_{utcnow():%Y%m%d}", format)
 
 
 class DeviceIn(BaseModel):

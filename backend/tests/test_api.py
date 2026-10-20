@@ -312,3 +312,50 @@ def test_user_export_lists_assigned_devices(client, engine):
     assert "PC-A, PC-B" in line and "Dell 7350" in line and "S1" in line
     devices_csv = client.get("/api/devices/export", params={"format": "csv"}).content.decode("utf-8-sig")
     assert "MAC Wi-Fi" in devices_csv.splitlines()[0] and "Programas" in devices_csv.splitlines()[0]
+
+
+def test_software_excel_by_department(client, engine):
+    import io
+
+    from sqlalchemy.orm import Session
+
+    from app.models import Department, SoftwareInstallation, SoftwareProduct, SoftwareVersion
+    with Session(engine) as db:
+        it, rrhh = Department(code="it", name="IT"), Department(code="rrhh", name="RR/HH")
+        db.add_all([it, rrhh])
+        db.flush()
+        pcs = [Device(hostname=h, department_id=d.id) for h, d in (("PC-1", it), ("PC-2", it), ("PC-3", rrhh))]
+        pcs.append(Device(hostname="PC-4"))  # sin departamento
+        chrome = SoftwareProduct(name="Google Chrome", publisher="Google LLC", name_key="google chrome",
+                                 publisher_key="google", category="application")
+        visio = SoftwareProduct(name="Visio", publisher="Microsoft", name_key="visio", publisher_key="microsoft",
+                                category="application")
+        db.add_all(pcs + [chrome, visio])
+        db.flush()
+        vc, vv = SoftwareVersion(product_id=chrome.id, version="129"), SoftwareVersion(product_id=visio.id, version="16")
+        db.add_all([vc, vv])
+        db.flush()
+        for pc in pcs:
+            db.add(SoftwareInstallation(device_id=pc.id, product_id=chrome.id, version_id=vc.id, source="intune"))
+        db.add(SoftwareInstallation(device_id=pcs[0].id, product_id=visio.id, version_id=vv.id, source="intune"))
+        db.commit()
+
+    r = client.get("/api/software/export", params={"format": "xlsx"})
+    assert r.status_code == 200 and "por_departamento" in r.headers["content-disposition"]
+    wb = load_workbook(io.BytesIO(r.content))
+    assert wb.sheetnames == ["IT", "RR-HH", "Sin departamento", "Inventario de equipos"]  # "/" no vale en hojas
+    ws = wb["IT"]
+    rows = {ws.cell(i, 1).value: i for i in range(5, ws.max_row + 1)}
+    assert ws.cell(rows["Google Chrome"], 6).value == 2 and ws.cell(rows["Google Chrome"], 7).value == "PC-1, PC-2"
+    assert ws.cell(rows["Visio"], 6).value == 1
+    assert ws.cell(rows["Visio"], 1).fill.fgColor.rgb.endswith("FFF2CC")  # en un solo equipo: amarillo
+    assert not ws.cell(rows["Google Chrome"], 1).fill.fgColor.rgb.endswith("FFF2CC")
+    inventory = wb["Inventario de equipos"]
+    assert [inventory.cell(i, 1).value for i in range(2, inventory.max_row + 1)] == ["PC-1", "PC-2", "PC-3", "PC-4"]
+    # Filtro de departamento: solo su hoja y sus equipos.
+    with Session(engine) as db:
+        it_id = db.query(Department).filter_by(code="it").one().id
+    wb = load_workbook(io.BytesIO(client.get("/api/software/export", params={"format": "xlsx",
+                                                                             "department_id": it_id}).content))
+    assert wb.sheetnames == ["IT", "Inventario de equipos"]
+    assert wb["Inventario de equipos"].max_row == 3
