@@ -49,6 +49,11 @@ def test_certificate_subject_publishers():
 def test_windows_packages_are_system_components():
     dn = "CN=Microsoft Corporation, O=Microsoft Corporation, C=US"
     assert classify("Microsoft.BingNews", dn) == "system_component"
-    assert classify("3A48D7FC-AEE2-4CBC-91D1-0007951B8006", "CN=Contoso") == "system_component"
+    assert classify("Microsoft.NET.Native.Runtime.2.2", dn) == "system_component"
+    assert classify("Microsoft.BingNews", "Microsoft Corporation") == "system_component"  # editor ya limpio
+    assert classify("Microsoft Edge", "Microsoft Corporation") == "application"
+    # Apps de la Store de otros fabricantes: son aplicaciones (Netflix, MyDell, McAfee…).
+    assert classify("4DF9E0F8.Netflix", "CN=52120C15-ACFA-47FC-A7E3-4974DBA79445") == "application"
+    assert classify("DellInc.MyDell", "CN=F005DA31-7CE1-4D3E-ABEE-08A4AFF4F592") == "application"
     assert classify("MSTeams", dn) == "application"  # app MSIX con nombre normal
     assert classify("Node.js", "Node.js Foundation") == "application"  # puntos, pero no es un paquete

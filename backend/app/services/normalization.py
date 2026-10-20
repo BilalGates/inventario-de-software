@@ -48,8 +48,10 @@ def name_key(name: str | None, version: str | None = None) -> str:
 # Valor entre comillas (Intune a veces las duplica: CN="Pulse Secure, LLC"") o hasta la coma.
 _DN_ATTR = re.compile(r'(?:^|,)\s*(CN|O)=(?:"+([^"]*)"*|([^,]*))', re.IGNORECASE)
 _GUID = re.compile(r"^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$", re.IGNORECASE)
-# Nombre de paquete MSIX/AppX: "Microsoft.BingNews", "AD2F1837.myHP" (sin espacios, con puntos).
-_PACKAGE_NAME = re.compile(r"^[A-Za-z0-9]+(\.[A-Za-z0-9_-]+)+$")
+# Paquete MSIX/AppX de Microsoft o Windows: "Microsoft.BingNews", "MicrosoftWindows.Client.WebExperience",
+# "WindowsWorkload.Manager…". Los de otros fabricantes (4DF9E0F8.Netflix, DellInc.MyDell…) son aplicaciones.
+_WINDOWS_PACKAGE = re.compile(r"^(microsoft|microsoftwindows|microsoftcorporationii|windows|windowsworkload)"
+                              r"(\.[A-Za-z0-9_-]+)+$", re.IGNORECASE)
 
 
 def is_certificate_subject(publisher: str | None) -> bool:
@@ -116,8 +118,10 @@ _RULES: list[tuple[str, re.Pattern]] = [
 def classify(name: str | None, publisher: str | None = None) -> str:
     """Clasificación orientativa. IT puede cambiarla y la manual nunca se sobrescribe."""
     text = _base(name)
-    if is_certificate_subject(publisher) and (_PACKAGE_NAME.match(text) or _GUID.match(text)):
-        # Paquetes de Windows/Store (Microsoft.BingNews, Microsoft.NET.Native.Runtime…), no programas.
+    # Solo por el nombre: el editor llega limpio (sin "CN=") tras normalizarlo, y los programas de
+    # escritorio de Microsoft se llaman con espacios ("Microsoft Edge", "Microsoft .NET Runtime").
+    if _WINDOWS_PACKAGE.match(text):
+        # Paquetes de Windows (Microsoft.BingNews, Microsoft.NET.Native.Runtime…, códecs, idiomas), no programas.
         return "system_component"
     for category, pattern in _RULES:
         if pattern.search(text):

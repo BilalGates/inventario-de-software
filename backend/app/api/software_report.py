@@ -3,7 +3,8 @@
 - Una hoja por departamento (y "Sin departamento" si hay equipos sin asignar): cada programa
   instalado en sus equipos con el número de equipos y cuáles son. Las filas de programas que
   solo están en un equipo del departamento se marcan en amarillo.
-- Última hoja: inventario de equipos (las mismas columnas que la exportación de dispositivos).
+- Última hoja: inventario de equipos agrupado por departamento (las mismas columnas que la
+  exportación de dispositivos), con una fila de título por departamento.
 """
 from __future__ import annotations
 
@@ -29,6 +30,7 @@ DEVICE_STATUS_LABEL = {"active": "En uso", "in_stock": "En almacén", "repair": 
 
 HEADER_FILL = PatternFill("solid", fgColor="1F2937")
 SINGLE_FILL = PatternFill("solid", fgColor="FFF2CC")  # amarillo claro: programa en un solo equipo
+GROUP_FILL = PatternFill("solid", fgColor="E5E7EB")  # fila de título de cada departamento
 SOFTWARE_COLUMNS = [("Programa", 45), ("Editor", 30), ("Categoría", 22), ("Autorización", 22), ("Versiones", 28),
                     ("Nº equipos", 11), ("Equipos", 70)]
 NO_DEPARTMENT = "Sin departamento"
@@ -111,15 +113,29 @@ def build_workbook(db: Session, product_ids: set[int], department_id: int | None
         ws.auto_filter.ref = f"A4:{get_column_letter(len(SOFTWARE_COLUMNS))}{max(last, 5)}"
         ws.freeze_panes = "B5"
 
+    # Inventario de equipos agrupado por departamento: una fila de título por grupo y sus equipos.
     ws = wb.create_sheet(_sheet_title("Inventario de equipos", used))
     _header(ws, 1, [t for _, t in device_columns])
-    for r, row in enumerate(device_rows, 2):
-        row = {**row, "status": DEVICE_STATUS_LABEL.get(row.get("status"), row.get("status"))}
-        for c, (key, _) in enumerate(device_columns, 1):
-            ws.cell(r, c, _csv_safe(_cell(row.get(key))))
+    groups: dict[str, list[dict]] = defaultdict(list)
+    for row in device_rows:
+        groups[row.get("department") or NO_DEPARTMENT].append(row)
+    r = 2
+    for name in sorted(groups, key=lambda n: (n == NO_DEPARTMENT, n.casefold())):
+        members = sorted(groups[name], key=lambda d: (d.get("name") or "").casefold())
+        title = ws.cell(r, 1, f"{name} · {len(members)} equipos")
+        title.font = Font(bold=True, color="111827")
+        for c in range(1, len(device_columns) + 1):
+            ws.cell(r, c).fill = GROUP_FILL
+        r += 1
+        for row in members:
+            row = {**row, "status": DEVICE_STATUS_LABEL.get(row.get("status"), row.get("status"))}
+            for c, (key, _) in enumerate(device_columns, 1):
+                ws.cell(r, c, _csv_safe(_cell(row.get(key))))
+            ws.row_dimensions[r].outline_level = 1  # se puede plegar cada departamento en Excel
+            r += 1
     for c, (_, title) in enumerate(device_columns, 1):
         ws.column_dimensions[get_column_letter(c)].width = max(12, min(40, len(title) + 4))
-    ws.auto_filter.ref = f"A1:{get_column_letter(len(device_columns))}{max(len(device_rows) + 1, 2)}"
+    ws.sheet_properties.outlinePr.summaryBelow = False
     ws.freeze_panes = "B2"
 
     buf = io.BytesIO()

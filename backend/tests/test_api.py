@@ -351,11 +351,12 @@ def test_software_excel_by_department(client, engine):
     assert ws.cell(rows["Visio"], 1).fill.fgColor.rgb.endswith("FFF2CC")  # en un solo equipo: amarillo
     assert not ws.cell(rows["Google Chrome"], 1).fill.fgColor.rgb.endswith("FFF2CC")
     inventory = wb["Inventario de equipos"]
-    assert [inventory.cell(i, 1).value for i in range(2, inventory.max_row + 1)] == ["PC-1", "PC-2", "PC-3", "PC-4"]
+    assert [inventory.cell(i, 1).value for i in range(2, inventory.max_row + 1)] == [
+        "IT · 2 equipos", "PC-1", "PC-2", "RR/HH · 1 equipos", "PC-3", "Sin departamento · 1 equipos", "PC-4"]
     # Filtro de departamento: solo su hoja y sus equipos.
     with Session(engine) as db:
         it_id = db.query(Department).filter_by(code="it").one().id
     wb = load_workbook(io.BytesIO(client.get("/api/software/export", params={"format": "xlsx",
                                                                              "department_id": it_id}).content))
     assert wb.sheetnames == ["IT", "Inventario de equipos"]
-    assert wb["Inventario de equipos"].max_row == 3
+    assert wb["Inventario de equipos"].max_row == 4  # cabecera + título de IT + 2 equipos

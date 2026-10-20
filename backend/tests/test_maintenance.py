@@ -21,10 +21,13 @@ def test_renormalize_dry_run_then_apply(db):
     pkg = _product(db, "Microsoft.BingNews", DN)
     teams = _product(db, "MSTeams", DN)
     manual = _product(db, "Microsoft.Copilot", DN, category="runtime")  # clasificado a mano: no se toca
+    netflix = _product(db, "4DF9E0F8.Netflix", "CN=52120C15-ACFA-47FC-A7E3-4974DBA79445", category="system_component")
+    from app.services import audit
+    audit.record(db, "it@local", "software.update", "software_product", manual.id, "Reclasificado a mano")
     db.commit()
 
     report = renormalize_software(db, "it@local", apply=False)
-    assert report["publisher"] == 3 and report["category"] == 1
+    assert report["publisher"] == 4 and report["category"] == 2  # BingNews -> componente, Netflix -> aplicación
     assert db.get(SoftwareProduct, pkg.id).publisher == DN  # simulación: nada cambia
 
     renormalize_software(db, "it@local", apply=True)
@@ -33,6 +36,8 @@ def test_renormalize_dry_run_then_apply(db):
     assert pkg.category == "system_component" and not pkg.is_relevant
     assert teams.category == "application" and teams.publisher == "Microsoft Corporation"
     assert manual.category == "runtime"
+    netflix = db.get(SoftwareProduct, netflix.id)
+    assert netflix.category == "application" and netflix.is_relevant and netflix.publisher is None
     alias = db.execute(select(SoftwareAlias).where(SoftwareAlias.product_id == pkg.id)).scalar_one()
     assert alias.raw_publisher_key == "microsoft"
     assert db.execute(select(AuditEvent).where(AuditEvent.action == "software.renormalize")).scalar_one()

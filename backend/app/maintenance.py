@@ -5,8 +5,8 @@
 
 renormalizar-software: vuelve a aplicar las reglas de normalización actuales a los productos
 existentes (editor legible a partir del sujeto de certificado de las apps MSIX/AppX y
-clasificación de paquetes de Windows como componentes del sistema). Las categorías solo
-pasan de "application" a otra: nunca se deshace una clasificación hecha por IT.
+clasificación de paquetes de Windows como componentes del sistema). Nunca cambia la
+categoría de un producto editado a mano por IT (según la auditoría).
 """
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db import session_scope
-from app.models import SoftwareAlias, SoftwareProduct
+from app.models import AuditEvent, SoftwareAlias, SoftwareProduct
 from app.services import audit
 from app.services.normalization import classify, clean_publisher, publisher_key
 
@@ -29,13 +29,16 @@ def renormalize_software(db: Session, actor: str, apply: bool) -> dict:
     # para que las importaciones futuras se redirijan al destino.
     taken = {(p.name_key, p.publisher_key): p for p in every}
     report = {"publisher": 0, "category": 0, "collisions": [], "examples": []}
+    edited = {int(i) for i in db.execute(select(AuditEvent.entity_id).where(
+        AuditEvent.entity_type == "software_product", AuditEvent.action == "software.update")).scalars() if i}
     for p in products:
-        # La categoría se calcula con el editor original: el sujeto de certificado es la señal de paquete.
-        new_cat = classify(p.name, p.publisher) if p.category == "application" else p.category
+        # La categoría se calcula con el editor original: el sujeto de certificado es la señal de
+        # paquete. Solo se recalculan categorías automáticas (producto nunca editado a mano).
+        new_cat = p.category if p.id in edited else classify(p.name, p.publisher)
         if new_cat != p.category:
             report["category"] += 1
             if apply:
-                p.category, p.is_relevant = new_cat, False
+                p.category, p.is_relevant = new_cat, new_cat == "application"
         new_pk = publisher_key(p.publisher)
         if new_pk != p.publisher_key and p.publisher != clean_publisher(p.publisher):
             other = taken.get((p.name_key, new_pk))
