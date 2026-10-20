@@ -18,6 +18,7 @@ reinicia si cae. Acceso: **http://127.0.0.1:8180**. Datos y configuración en
 | Registros | `%LOCALAPPDATA%\InventarioAsserta\logs\` (`app.log`, `app-output.log`, `supervisor.log`) |
 | Actualizar | `git pull`, borrar `frontend\dist` si cambió la interfaz, y volver a ejecutar el instalador |
 | Desinstalar | `deploy\windows\uninstall-autostart.ps1` (no borra datos) |
+| Renormalizar el catálogo | `cd backend; .venv\Scripts\python -m app.maintenance renormalizar-software` (simulación; `--apply` aplica y queda en auditoría). Tras cambiar las reglas de normalización |
 
 Verificado el 2026-10-16 en el equipo de IT: arranque, interfaz, API y reinicio automático
 tras matar el proceso (relanzado en 10 s). El puerto 8080 lo ocupa un servicio de Windows
