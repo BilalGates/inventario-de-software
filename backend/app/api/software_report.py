@@ -11,6 +11,8 @@ from __future__ import annotations
 import io
 import re
 from collections import defaultdict
+from collections.abc import Callable
+from dataclasses import dataclass
 
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
@@ -54,54 +56,75 @@ def _header(ws, row: int, titles: list[str]) -> None:
         cell.alignment = Alignment(vertical="center")
 
 
-def build_workbook(db: Session, product_ids: set[int], department_id: int | None,
-                   device_rows: list[dict], device_columns: list[tuple[str, str]], generated: str) -> bytes:
-    rows = db.execute(
-        select(Device.id, Device.department_id, Device.hostname, Device.serial_number,
-               SoftwareInstallation.product_id, SoftwareVersion.version)
-        .join(SoftwareInstallation, SoftwareInstallation.device_id == Device.id)
-        .join(SoftwareVersion, SoftwareVersion.id == SoftwareInstallation.version_id)
-        .where(SoftwareInstallation.present.is_(True), Device.status != "retired",
-               SoftwareInstallation.product_id.in_(product_ids) if product_ids else false())
-    ).all()
-    # departamento -> producto -> {equipo: nombre}, y versiones
-    per_dept: dict[int | None, dict[int, dict[int, str]]] = defaultdict(lambda: defaultdict(dict))
-    versions: dict[tuple[int | None, int], set[str]] = defaultdict(set)
-    for dev_id, dept_id, hostname, serial, product_id, version in rows:
-        if department_id and dept_id != department_id:
-            continue
-        per_dept[dept_id][product_id][dev_id] = hostname or serial or f"#{dev_id}"
-        versions[(dept_id, product_id)].add(version or "?")
+@dataclass(frozen=True)
+class Install:
+    """Una instalación para el informe. `authorization`: None = estado actual del producto."""
+    device_id: int
+    department: str  # nombre del departamento (NO_DEPARTMENT si no tiene)
+    device_label: str
+    product_id: int
+    version: str
+    authorization: str | None = None
 
+
+def live_installs(db: Session, product_ids: set[int], department_id: int | None) -> list[Install]:
+    """Instalaciones vigentes (exportación de Software)."""
+    departments = dict(db.execute(select(Department.id, Department.name)).all())
+    query = (select(Device.id, Device.department_id, Device.hostname, Device.serial_number,
+                    SoftwareInstallation.product_id, SoftwareVersion.version)
+             .join(SoftwareInstallation, SoftwareInstallation.device_id == Device.id)
+             .join(SoftwareVersion, SoftwareVersion.id == SoftwareInstallation.version_id)
+             .where(SoftwareInstallation.present.is_(True), Device.status != "retired",
+                    SoftwareInstallation.product_id.in_(product_ids) if product_ids else false()))
+    if department_id:
+        query = query.where(Device.department_id == department_id)
+    return [Install(dev_id, departments.get(dept_id) or NO_DEPARTMENT, hostname or serial or f"#{dev_id}", pid,
+                    version or "?") for dev_id, dept_id, hostname, serial, pid, version in db.execute(query)]
+
+
+def build_workbook(db: Session, installs: list[Install], device_rows: list[dict],
+                   device_columns: list[tuple[str, str]], generated: str,
+                   only_department: str | None = None,
+                   before: Callable[[Workbook, set[str]], None] | None = None,
+                   after: Callable[[Workbook, set[str]], None] | None = None) -> bytes:
+    """Hojas por departamento + inventario de equipos agrupado. `before`/`after` añaden hojas extra."""
+    per_dept: dict[str, dict[int, dict[int, str]]] = defaultdict(lambda: defaultdict(dict))
+    versions: dict[tuple[str, int], set[str]] = defaultdict(set)
+    auths: dict[tuple[str, int], set[str]] = defaultdict(set)
+    for i in installs:
+        per_dept[i.department][i.product_id][i.device_id] = i.device_label
+        versions[(i.department, i.product_id)].add(i.version)
+        if i.authorization:
+            auths[(i.department, i.product_id)].add(i.authorization)
     products = {p.id: p for p in db.execute(select(SoftwareProduct).where(
-        SoftwareProduct.id.in_({pid for prods in per_dept.values() for pid in prods}))).scalars()}
-    departments = {d.id: d.name for d in db.execute(select(Department)).scalars()}
-    dept_devices: dict[int | None, int] = defaultdict(int)
-    for d in db.execute(select(Device.department_id).where(Device.status != "retired")).scalars():
-        dept_devices[d] += 1
+        SoftwareProduct.id.in_({i.product_id for i in installs}))).scalars()} if installs else {}
+    dept_devices: dict[str, int] = defaultdict(int)
+    for row in device_rows:
+        dept_devices[row.get("department") or NO_DEPARTMENT] += 1
 
     wb = Workbook()
     wb.remove(wb.active)
     used: set[str] = set()
-    order = sorted(per_dept, key=lambda d: (d is None, (departments.get(d) or "").casefold()))
-    if department_id and department_id not in per_dept:
-        order = [department_id]
-    for dept_id in order:
-        name = departments.get(dept_id, NO_DEPARTMENT) if dept_id is not None else NO_DEPARTMENT
+    if before:
+        before(wb, used)
+    order = sorted(set(per_dept) | ({only_department} if only_department else set()),
+                   key=lambda n: (n == NO_DEPARTMENT, n.casefold()))
+    for name in order:
         ws = wb.create_sheet(_sheet_title(name, used))
-        prods = per_dept.get(dept_id, {})
+        prods = per_dept.get(name, {})
         single = sum(len(devs) == 1 for devs in prods.values())
         ws.cell(1, 1, name).font = Font(bold=True, size=14)
-        ws.cell(2, 1, f"{dept_devices.get(dept_id, 0)} equipos · {len(prods)} programas · "
-                      f"{single} en un solo equipo (en amarillo) · generado {generated}").font = Font(italic=True,
-                                                                                                     color="6B7280")
+        ws.cell(2, 1, f"{dept_devices.get(name, 0)} equipos · {len(prods)} programas · "
+                      f"{single} en un solo equipo (en amarillo) · {generated}").font = Font(italic=True,
+                                                                                            color="6B7280")
         _header(ws, 4, [t for t, _ in SOFTWARE_COLUMNS])
         ordered = sorted(prods.items(), key=lambda kv: (-len(kv[1]), products[kv[0]].name.casefold()))
         for r, (pid, devs) in enumerate(ordered, 5):
             p = products[pid]
+            status = auths.get((name, pid)) or {p.authorization_status}
             values = [p.name, p.publisher, CATEGORY_LABEL.get(p.category, p.category),
-                      AUTH_LABEL.get(p.authorization_status, p.authorization_status),
-                      ", ".join(sorted(versions[(dept_id, pid)])), len(devs),
+                      ", ".join(sorted(AUTH_LABEL.get(a, a) for a in status)),
+                      ", ".join(sorted(versions[(name, pid)])), len(devs),
                       ", ".join(sorted(devs.values(), key=str.casefold))]
             for c, value in enumerate(values, 1):
                 cell = ws.cell(r, c, _csv_safe(value))  # openpyxl trataría "=..." como fórmula
@@ -138,6 +161,8 @@ def build_workbook(db: Session, product_ids: set[int], department_id: int | None
     ws.sheet_properties.outlinePr.summaryBelow = False
     ws.freeze_panes = "B2"
 
+    if after:
+        after(wb, used)
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()

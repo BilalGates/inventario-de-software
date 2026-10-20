@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.api.common import Page, export_response, not_found, paginate
 from app.api.routes.devices import DEVICE_EXPORT_COLUMNS, device_export_rows
-from app.api.software_report import build_workbook
+from app.api.software_report import build_workbook, live_installs
 from app.core.config import get_settings
 from app.core.security import CurrentUser, Reader, Technician
 from app.db import get_db, utcnow
@@ -141,8 +141,9 @@ def _department_workbook(db: Session, user, products: list[SoftwareProduct], dep
     if department_id:
         devices = devices.where(Device.department_id == department_id)
     device_rows = device_export_rows(db, devices, stale_days)
-    content = build_workbook(db, {p.id for p in products}, department_id, device_rows, DEVICE_EXPORT_COLUMNS,
-                             f"{utcnow():%d/%m/%Y %H:%M} UTC")
+    only = db.get(Department, department_id).name if department_id and db.get(Department, department_id) else None
+    content = build_workbook(db, live_installs(db, {p.id for p in products}, department_id), device_rows,
+                             DEVICE_EXPORT_COLUMNS, f"generado {utcnow():%d/%m/%Y %H:%M} UTC", only_department=only)
     audit.record(db, user.upn, "export.software", "software_product", None,
                  f"Exportación por departamento de {len(products)} productos y {len(device_rows)} equipos")
     db.commit()

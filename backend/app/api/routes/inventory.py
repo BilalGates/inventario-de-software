@@ -6,13 +6,15 @@ from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
-from openpyxl import Workbook
-from openpyxl.styles import Font, PatternFill
+from openpyxl.styles import Font
+from openpyxl.utils import get_column_letter
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from app.api.common import Page, _csv_safe, export_response, not_found, paginate
+from app.api.routes.devices import DEVICE_EXPORT_COLUMNS, device_export_rows
+from app.api.software_report import NO_DEPARTMENT, Install, _header, _sheet_title, build_workbook
 from app.connectors.base import ConnectorError
 from app.connectors.files import decode
 from app.connectors.graph_delegated import DeviceCodeLogin, TokenStore
@@ -366,7 +368,8 @@ def compare_snapshots(base: int, target: int, db: Session = Depends(get_db), _: 
 
 @router.get("/snapshots/{snapshot_id}/report")
 def snapshot_report(snapshot_id: int, db: Session = Depends(get_db), user: CurrentUser = Reader):
-    """Informe mensual en Excel: resumen, cobertura, equipos, software, cambios y no autorizados."""
+    """Informe mensual: el mismo Excel que la exportación de Software, con los datos congelados del
+    inventario (departamento, versión y autorización de ese mes), más el resumen y los cambios."""
     snap = db.get(InventorySnapshot, snapshot_id)
     if snap is None:
         raise not_found("Inventario")
@@ -374,71 +377,84 @@ def snapshot_report(snapshot_id: int, db: Session = Depends(get_db), user: Curre
     dev_ids = {i.device_id for i in items}
     prod_ids = {i.product_id for i in items if i.product_id}
     devices = {d.id: d for d in db.execute(select(Device).where(Device.id.in_(dev_ids))).scalars()} if dev_ids else {}
-    products = {p.id: p for p in db.execute(select(SoftwareProduct).where(SoftwareProduct.id.in_(prod_ids))).scalars()} \
-        if prod_ids else {}
+    products = {p.id: p for p in db.execute(select(SoftwareProduct).where(SoftwareProduct.id.in_(prod_ids))).scalars()}         if prod_ids else {}
     depts = dict(db.execute(select(Department.id, Department.name)).all())
+    snap_dept = {i.device_id: depts.get(i.department_id) for i in items if i.product_id is None}
 
-    wb = Workbook()
-    head_font, head_fill = Font(bold=True, color="FFFFFF"), PatternFill("solid", fgColor="1F2937")
+    def label(device_id: int) -> str:
+        d = devices.get(device_id)
+        return (d.hostname or d.serial_number) if d and (d.hostname or d.serial_number) else f"#{device_id}"
 
-    def sheet(title, headers, rows, first=False):
-        ws = wb.active if first else wb.create_sheet()
-        ws.title = title
-        ws.append(headers)
-        for c in ws[1]:
-            c.font, c.fill = head_font, head_fill
-        for r in rows:
-            ws.append([_csv_safe(v) for v in r])
-        ws.freeze_panes = "A2"
-        for i in range(1, len(headers) + 1):
-            ws.column_dimensions[ws.cell(1, i).column_letter].width = 28
-        return ws
+    # Como la exportación de Software por defecto: solo aplicaciones relevantes.
+    installs = [Install(i.device_id, depts.get(i.department_id) or NO_DEPARTMENT, label(i.device_id), i.product_id,
+                        i.version or "?", i.authorization_status or "unclassified")
+                for i in items if i.product_id and products[i.product_id].is_relevant]
+    stale_days = get_settings().stale_device_days
+    device_rows = device_export_rows(db, select(Device).where(Device.id.in_(dev_ids or {0})), stale_days)
+    for row in device_rows:  # el departamento es el del inventario, no el actual
+        row["department"] = snap_dept.get(row["id"])
 
     t = snap.totals or {}
-    sheet("Resumen", ["Concepto", "Valor"], [
-        ("Periodo", snap.period), ("Versión", snap.version), ("Estado", snap.status),
-        ("Completo", "Sí" if snap.is_complete else "NO — alguna fuente esencial no completó"),
-        ("Generado", f"{snap.created_at:%Y-%m-%d %H:%M} UTC por {snap.created_by}"),
-        ("Revisado", f"{snap.reviewed_at:%Y-%m-%d %H:%M} UTC por {snap.reviewed_by}" if snap.reviewed_at else "Pendiente"),
-        ("Notas de revisión", snap.review_notes or ""), ("Dispositivos", t.get("devices")),
-        ("Instalaciones", t.get("installations")), ("Productos", t.get("products")),
-        *[(f"Instalaciones {k}", v) for k, v in sorted((t.get("by_status") or {}).items())],
-        ("Informe generado", f"{utcnow():%Y-%m-%d %H:%M} UTC por {user.upn}"),
-        ("Nota", "Evidencia del inventario; no constituye por sí misma una declaración de conformidad ENS."),
-    ], first=True)
-    sheet("Cobertura", ["Fuente", "Esencial", "Correcta", "Ejecuciones", "Última completa", "Fallos posteriores"], [
-        (v["name"], v["essential"], v["ok"], v["runs"], v["last_complete_run_id"], v["failed_after_last_complete"])
-        for v in ((snap.coverage or {}).get("sources") or {}).values()])
-    sheet("Dispositivos", ["Equipo", "Nº serie", "Departamento", "Usuario", "Modelo", "SO", "Última observación"], [
-        (d.display_name, d.serial_number, depts.get(i.department_id), d.primary_user.upn if d.primary_user else None,
-         d.model, f"{d.os_name or ''} {d.os_version or ''}".strip(), d.last_seen_at)
-        for i in items if i.product_id is None and (d := devices.get(i.device_id))])
-    sheet("Software", ["Equipo", "Departamento", "Producto", "Editor", "Versión", "Autorización"], [
-        (devices[i.device_id].display_name, depts.get(i.department_id), products[i.product_id].name,
-         products[i.product_id].publisher, i.version, i.authorization_status)
-        for i in items if i.product_id and products[i.product_id].is_relevant])
-    sheet("No autorizado", ["Equipo", "Producto", "Versión"], [
-        (devices[i.device_id].display_name, products[i.product_id].name, i.version)
-        for i in items if i.product_id and i.authorization_status == "unauthorized"])
-    prev = snapshots.previous_snapshot(db, snap)
-    if prev:
-        diff = snapshots.compare(db, prev.id, snap.id)
-        all_dev = {x["device_id"] for k in ("installs_added", "installs_removed", "versions_changed") for x in diff[k]}
-        all_prod = {x["product_id"] for k in ("installs_added", "installs_removed", "versions_changed") for x in diff[k]}
-        dn, pn = _names(db, all_dev, all_prod)
-        rows = [("Alta", dn.get(x["device_id"]), pn.get(x["product_id"]), "", ", ".join(x["versions"]))
-                for x in diff["installs_added"]]
-        rows += [("Baja", dn.get(x["device_id"]), pn.get(x["product_id"]), ", ".join(x["versions"]), "")
-                 for x in diff["installs_removed"]]
-        rows += [("Versión", dn.get(x["device_id"]), pn.get(x["product_id"]), ", ".join(x["from"]), ", ".join(x["to"]))
-                 for x in diff["versions_changed"]]
-        sheet(f"Cambios vs {prev.period}", ["Tipo", "Equipo", "Producto", "Antes", "Después"], rows)
-    buf = io.BytesIO()
-    wb.save(buf)
-    buf.seek(0)
+
+    def summary(wb, used):
+        ws = wb.create_sheet(_sheet_title("Resumen", used))
+        rows = [
+            ("Periodo", snap.period), ("Versión", snap.version),
+            ("Estado", {"draft": "Pendiente de revisión", "approved": "Aprobado", "rejected": "Rechazado",
+                        "legacy": "Histórico importado"}.get(snap.status, snap.status)),
+            ("Completo", "Sí" if snap.is_complete else "NO — alguna fuente esencial no completó"),
+            ("Generado", f"{snap.created_at:%Y-%m-%d %H:%M} UTC por {snap.created_by}"),
+            ("Revisado", f"{snap.reviewed_at:%Y-%m-%d %H:%M} UTC por {snap.reviewed_by}" if snap.reviewed_at
+             else "Pendiente"),
+            ("Notas de revisión", snap.review_notes or ""), ("Dispositivos", t.get("devices")),
+            ("Instalaciones", t.get("installations")), ("Productos", t.get("products")),
+            *[(f"Instalaciones {k}", v) for k, v in sorted((t.get("by_status") or {}).items())],
+            *[(f"Fuente {v['name']}", f"{'correcta' if v['ok'] else 'INCOMPLETA'} · {v['runs']} ejecuciones"
+               f"{' · esencial' if v['essential'] else ''}")
+              for v in ((snap.coverage or {}).get("sources") or {}).values()],
+            ("Informe generado", f"{utcnow():%Y-%m-%d %H:%M} UTC por {user.upn}"),
+            ("Nota", "Evidencia del inventario; no constituye por sí misma una declaración de conformidad ENS."),
+        ]
+        _header(ws, 1, ["Concepto", "Valor"])
+        for r, (k, v) in enumerate(rows, 2):
+            ws.cell(r, 1, k).font = Font(bold=True)
+            ws.cell(r, 2, _csv_safe(v))
+        ws.column_dimensions["A"].width, ws.column_dimensions["B"].width = 30, 70
+
+    def extra(wb, used):
+        def table(title, headers, rows):
+            ws = wb.create_sheet(_sheet_title(title, used))
+            _header(ws, 1, headers)
+            for r, values in enumerate(rows, 2):
+                for c, v in enumerate(values, 1):
+                    ws.cell(r, c, _csv_safe(v))
+            for c in range(1, len(headers) + 1):
+                ws.column_dimensions[get_column_letter(c)].width = 34
+            ws.freeze_panes = "A2"
+        unauthorized = [(label(i.device_id), depts.get(i.department_id) or NO_DEPARTMENT, products[i.product_id].name,
+                         i.version) for i in items if i.product_id and i.authorization_status == "unauthorized"]
+        if unauthorized:
+            table("No autorizado", ["Equipo", "Departamento", "Producto", "Versión"], unauthorized)
+        prev = snapshots.previous_snapshot(db, snap)
+        if prev:
+            diff = snapshots.compare(db, prev.id, snap.id)
+            all_dev = {x["device_id"] for k in ("installs_added", "installs_removed", "versions_changed") for x in diff[k]}
+            all_prod = {x["product_id"] for k in ("installs_added", "installs_removed", "versions_changed") for x in diff[k]}
+            dn, pn = _names(db, all_dev, all_prod)
+            rows = [("Alta", dn.get(x["device_id"]), pn.get(x["product_id"]), "", ", ".join(x["versions"]))
+                    for x in diff["installs_added"]]
+            rows += [("Baja", dn.get(x["device_id"]), pn.get(x["product_id"]), ", ".join(x["versions"]), "")
+                     for x in diff["installs_removed"]]
+            rows += [("Versión", dn.get(x["device_id"]), pn.get(x["product_id"]), ", ".join(x["from"]),
+                      ", ".join(x["to"])) for x in diff["versions_changed"]]
+            table(f"Cambios vs {prev.period}", ["Tipo", "Equipo", "Producto", "Antes", "Después"], rows)
+
+    content = build_workbook(db, installs, device_rows, DEVICE_EXPORT_COLUMNS,
+                             f"inventario {snap.period} v{snap.version}", before=summary, after=extra)
     audit.record(db, user.upn, "report.monthly", "inventory_snapshot", snap.id, f"Informe {snap.period}")
     db.commit()
-    return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    return StreamingResponse(io.BytesIO(content),
+                             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                              headers={"Content-Disposition":
                                       f'attachment; filename="inventario_{snap.period}_v{snap.version}.xlsx"'})
 

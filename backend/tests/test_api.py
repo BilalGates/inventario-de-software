@@ -194,7 +194,15 @@ def test_snapshot_generate_review_compare_and_report(client, db):
     assert rep.status_code == 200
     import io
     wb = load_workbook(io.BytesIO(rep.content))
-    assert "Cambios vs 2026-09" in wb.sheetnames and "Cobertura" in wb.sheetnames
+    # Mismo Excel que la exportación de Software, con resumen delante y cambios detrás.
+    assert wb.sheetnames == ["Resumen", "Sin departamento", "Inventario de equipos", "Cambios vs 2026-09"]
+    sheet = wb["Sin departamento"]
+    assert any(sheet.cell(r, 7).value == "PC-9" for r in range(5, sheet.max_row + 1))
+    # El departamento es el congelado en el inventario: moverlo después no cambia el informe.
+    dept = client.post("/api/departments", json={"name": "Ventas"}).json()
+    client.patch(f"/api/devices/{dev['id']}", json={"department_id": dept["id"]})
+    wb = load_workbook(io.BytesIO(client.get(f"/api/snapshots/{s2['id']}/report").content))
+    assert "Ventas" not in wb.sheetnames and "Sin departamento" in wb.sheetnames
     changes = client.get("/api/changes", params={"type": "software_version_changed"}).json()
     assert changes["total"] == 1
 
