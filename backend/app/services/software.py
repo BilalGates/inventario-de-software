@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.db import utcnow
 from app.models import Device, SoftwareAlias, SoftwarePolicy, SoftwareProduct, SoftwareVersion
-from app.services.normalization import classify, display_name, name_key, publisher_key, version_text
+from app.services.normalization import classify, clean_publisher, display_name, name_key, publisher_key, version_text
 
 
 class ProductResolver:
@@ -44,7 +44,7 @@ class ProductResolver:
         if product is None:
             category = classify(raw_name, raw_publisher)
             product = SoftwareProduct(
-                name=display_name(raw_name, version)[:300], publisher=(raw_publisher or None),
+                name=display_name(raw_name, version)[:300], publisher=clean_publisher(raw_publisher),
                 name_key=nk, publisher_key=pk, category=category, is_relevant=category == "application",
                 authorization_status="unclassified", first_seen_at=self.now, last_seen_at=self.now,
             )

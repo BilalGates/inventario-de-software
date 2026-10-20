@@ -45,8 +45,34 @@ def name_key(name: str | None, version: str | None = None) -> str:
     return val.casefold()[:190]
 
 
+# Valor entre comillas (Intune a veces las duplica: CN="Pulse Secure, LLC"") o hasta la coma.
+_DN_ATTR = re.compile(r'(?:^|,)\s*(CN|O)=(?:"+([^"]*)"*|([^,]*))', re.IGNORECASE)
+_GUID = re.compile(r"^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$", re.IGNORECASE)
+# Nombre de paquete MSIX/AppX: "Microsoft.BingNews", "AD2F1837.myHP" (sin espacios, con puntos).
+_PACKAGE_NAME = re.compile(r"^[A-Za-z0-9]+(\.[A-Za-z0-9_-]+)+$")
+
+
+def is_certificate_subject(publisher: str | None) -> bool:
+    """Las apps MSIX/AppX informan el editor como sujeto del certificado: "CN=..., O=..., C=US"."""
+    return bool(re.search(r"(^|,)\s*CN=", str(publisher or ""), re.IGNORECASE))
+
+
+def clean_publisher(publisher: str | None) -> str | None:
+    """Editor legible. Del sujeto de certificado toma CN (o O si CN es un GUID de la Store)."""
+    val = _base(publisher)
+    if not is_certificate_subject(val):
+        return val or None
+    attrs: dict[str, str] = {}
+    for key, quoted, plain in _DN_ATTR.findall(val):
+        attrs.setdefault(key.upper(), (quoted or plain).strip())
+    for key in ("CN", "O"):
+        if attrs.get(key) and not _GUID.match(attrs[key]):
+            return attrs[key][:200]
+    return None  # solo GUID: la Store no publica el nombre del editor
+
+
 def publisher_key(publisher: str | None) -> str:
-    val = _base(publisher).casefold().rstrip(".")
+    val = _base(clean_publisher(publisher)).casefold().rstrip(".")
     prev = None
     while prev != val:  # "Foo Corp., Inc." -> "foo"
         prev = val
@@ -90,6 +116,9 @@ _RULES: list[tuple[str, re.Pattern]] = [
 def classify(name: str | None, publisher: str | None = None) -> str:
     """Clasificación orientativa. IT puede cambiarla y la manual nunca se sobrescribe."""
     text = _base(name)
+    if is_certificate_subject(publisher) and (_PACKAGE_NAME.match(text) or _GUID.match(text)):
+        # Paquetes de Windows/Store (Microsoft.BingNews, Microsoft.NET.Native.Runtime…), no programas.
+        return "system_component"
     for category, pattern in _RULES:
         if pattern.search(text):
             return category

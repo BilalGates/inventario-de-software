@@ -33,3 +33,22 @@ def test_serial_and_hostname_keys():
     assert serial_key("0000000") is None
     assert serial_key(" pf3abc12 ") == "PF3ABC12"
     assert hostname_key("pc-001.asserta.local") == "PC-001"
+
+
+def test_certificate_subject_publishers():
+    from app.services.normalization import clean_publisher
+    dn = "CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US"
+    assert clean_publisher(dn) == "Microsoft Corporation"
+    assert publisher_key(dn) == publisher_key("Microsoft Corporation")
+    assert clean_publisher('CN="Pulse Secure, LLC"", OU=Engineering-2021, O=""Pulse Secure, LLC""') == "Pulse Secure, LLC"
+    assert clean_publisher("CN=1B347D37-7DB7-4426-8262-A4E441AA2D89") is None  # GUID de la Store sin nombre
+    assert clean_publisher("CN=1B347D37-7DB7-4426-8262-A4E441AA2D89, O=Contoso Ltd") == "Contoso Ltd"
+    assert clean_publisher("Google LLC") == "Google LLC"
+
+
+def test_windows_packages_are_system_components():
+    dn = "CN=Microsoft Corporation, O=Microsoft Corporation, C=US"
+    assert classify("Microsoft.BingNews", dn) == "system_component"
+    assert classify("3A48D7FC-AEE2-4CBC-91D1-0007951B8006", "CN=Contoso") == "system_component"
+    assert classify("MSTeams", dn) == "application"  # app MSIX con nombre normal
+    assert classify("Node.js", "Node.js Foundation") == "application"  # puntos, pero no es un paquete
