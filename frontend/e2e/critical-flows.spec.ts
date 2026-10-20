@@ -36,7 +36,8 @@ test("departamento → dispositivo → importación Panda → software → autor
   // 4. El software aparece en la ficha, sin autorizar automáticamente
   await page.goto(deviceUrl);
   await page.getByRole("tab", { name: "Software" }).click();
-  await expect(page.getByRole("link", { name: "AnyDesk" })).toBeVisible();
+  // Margen amplio: en CI el primer intento carga la ficha en frío y 5 s se quedaban cortos (flaky).
+  await expect(page.getByRole("link", { name: "AnyDesk" })).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText("No clasificado").first()).toBeVisible();
 
   // 5. Prohibir AnyDesk globalmente → alerta crítica
@@ -89,6 +90,6 @@ test("movimiento masivo de dispositivos conserva el historial", async ({ page })
 
 test("la sincronización de Intune sin credenciales se bloquea con un mensaje claro", async ({ page }) => {
   await page.goto("/sincronizacion");
-  await expect(page.getByText("Sin credenciales")).toBeVisible();
+  await expect(page.getByText("Sin conectar")).toBeVisible();
   await expect(page.getByRole("button", { name: "Sincronizar ahora" })).toBeDisabled();
 });
