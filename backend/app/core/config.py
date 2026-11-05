@@ -1,4 +1,4 @@
-"""Configuración de Inventario Asserta 2.0, leída de variables de entorno / .env."""
+"""Configuración de Asserta Inventario 2.0, leída de variables de entorno / .env."""
 from __future__ import annotations
 
 import os

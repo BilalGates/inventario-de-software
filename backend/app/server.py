@@ -67,7 +67,7 @@ class InventoryServer:
 
         config = uvicorn.Config(create_app(), host=s.bind_host, port=s.port, log_config=None, access_log=False)
         self._uvicorn = uvicorn.Server(config)
-        log.info("Inventario Asserta escuchando en http://%s:%s", s.bind_host, s.port)
+        log.info("Asserta Inventario escuchando en http://%s:%s", s.bind_host, s.port)
         self._uvicorn.run()
         self._stop.set()
 

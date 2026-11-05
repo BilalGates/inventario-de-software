@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Arranque automático de Inventario Asserta al iniciar sesión, sin permisos de administrador.
+  Arranque automático de Asserta Inventario al iniciar sesión, sin permisos de administrador.
   Tarea programada en segundo plano (sin ventana) que se relanza si la aplicación cae.
   Acceso: http://127.0.0.1:8180 (solo desde este equipo).
 
@@ -36,7 +36,7 @@ New-Item -ItemType Directory -Force $IntuneDir | Out-Null
 if (-not (Test-Path $EnvFile)) {
   $d = $DataDir.Replace('\', '/')
   @"
-# Inventario Asserta - configuración (no subir a ningún repositorio)
+# Asserta Inventario - configuración (no subir a ningún repositorio)
 INV_ENVIRONMENT=production
 # local: sin login, solo accesible desde este equipo (127.0.0.1)
 INV_AUTH_MODE=local
@@ -60,7 +60,7 @@ $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoi
 $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Limited
 Stop-ScheduledTask -TaskName $Task -ErrorAction SilentlyContinue
 Register-ScheduledTask -TaskName $Task -Action $action -Trigger $trigger -Settings $settings -Principal $principal `
-  -Description "Inventario Asserta: web en http://127.0.0.1:$Port y sincronizaciones programadas" -Force | Out-Null
+  -Description "Asserta Inventario: web en http://127.0.0.1:$Port y sincronizaciones programadas" -Force | Out-Null
 
 Write-Host "5/5 Arranque" -ForegroundColor Cyan
 Start-ScheduledTask -TaskName $Task
@@ -69,5 +69,5 @@ foreach ($i in 1..30) {
   try { if ((Invoke-RestMethod "http://127.0.0.1:$Port/api/health" -TimeoutSec 2).database) { $ok = $true; break } } catch {}
   Start-Sleep 2
 }
-if ($ok) { Write-Host "Inventario Asserta funcionando: http://127.0.0.1:$Port" -ForegroundColor Green }
+if ($ok) { Write-Host "Asserta Inventario funcionando: http://127.0.0.1:$Port" -ForegroundColor Green }
 else { Write-Warning "No responde. Revise $DataDir\logs\app.log" }

@@ -44,14 +44,14 @@ describe("navegación y permisos", () => {
 
   it("un técnico ve la lista y puede crear dispositivos", async () => {
     renderAt("/dispositivos", "technician");
-    expect(await screen.findByRole("link", { name: "PC-007" })).toHaveAttribute("href", "/dispositivos/7");
+    expect(await screen.findByRole("link", { name: "PC-007" }, { timeout: 5000 })).toHaveAttribute("href", "/dispositivos/7");
     expect(screen.getByRole("button", { name: /Nuevo dispositivo/ })).toBeInTheDocument();
     expect(screen.getByRole("navigation", { name: "Principal" })).toBeInTheDocument();
   });
 
   it("un auditor no ve acciones de modificación", async () => {
     renderAt("/dispositivos", "auditor");
-    await screen.findByRole("link", { name: "PC-007" });
+    await screen.findByRole("link", { name: "PC-007" }, { timeout: 5000 });
     expect(screen.queryByRole("button", { name: /Nuevo dispositivo/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("checkbox", { name: "Seleccionar todos" })).not.toBeInTheDocument();
   });

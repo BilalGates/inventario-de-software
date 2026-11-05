@@ -102,7 +102,7 @@ function Sidebar({ expanded, onToggle, alerts, mobile }: { expanded: boolean; on
   return (
     <div className="flex h-full flex-col gap-1 bg-side px-3.5 py-5">
       <div className="mb-5 flex h-10 items-center px-1"><Logo full={expanded} /></div>
-      {expanded && <p className="eyebrow mb-2 px-[13px] text-[#8A847E]">Inventario IT</p>}
+      {expanded && <p className="eyebrow mb-2 px-[13px] text-[#8A847E]">Inventario</p>}
       <nav aria-label="Principal" className="flex flex-col gap-0.5">
         {NAV.map((item) => (
           <SideLink key={item.to} item={item} expanded={expanded} badge={item.to === "/auditoria" ? alerts : undefined} />
@@ -210,7 +210,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             </div>
           </div>
         </header>
-        <main id="main" className="mx-auto w-full max-w-[1400px] flex-1 px-4 py-8 lg:px-8 lg:py-9">{children}</main>
+        <main id="main" className="mx-auto w-full max-w-[1760px] flex-1 px-4 py-8 lg:px-8 lg:py-9">{children}</main>
       </div>
     </div>
   );

@@ -1,7 +1,7 @@
 #Requires -RunAsAdministrator
 <#
 .SYNOPSIS
-  Instala Inventario Asserta como servicio de Windows (arranque automático).
+  Instala Asserta Inventario como servicio de Windows (arranque automático).
   Después se accede desde el navegador en http://127.0.0.1:8180 (solo desde este equipo).
 
 .NOTES
@@ -42,7 +42,7 @@ if (-not (Test-Path $EnvFile)) {
   $IntuneFwd = $IntuneDir.Replace('\', '/')
   $db = "$DataFwd/inventario.db"
   @"
-# Inventario Asserta - configuración del servicio (no subir a ningún repositorio)
+# Asserta Inventario - configuración del servicio (no subir a ningún repositorio)
 INV_ENVIRONMENT=production
 # local: sin login, solo accesible desde este equipo (127.0.0.1)
 INV_AUTH_MODE=local
@@ -93,7 +93,7 @@ foreach ($i in 1..30) {
   Start-Sleep 2
 }
 if ($ok) {
-  Write-Host "`nInventario Asserta funcionando: http://127.0.0.1:$Port" -ForegroundColor Green
+  Write-Host "`nAsserta Inventario funcionando: http://127.0.0.1:$Port" -ForegroundColor Green
   Start-Process "http://127.0.0.1:$Port"
 } else {
   Write-Warning "El servicio no responde. Revise el Visor de eventos (Aplicación, origen 'InventarioAsserta')."

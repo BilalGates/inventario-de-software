@@ -83,7 +83,7 @@ def get_current_user(request: Request, db: Session = Depends(get_db),
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Tenant no autorizado")
     role = _role_from_claims(claims, settings)
     if role is None:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Su cuenta no tiene un rol asignado en Inventario Asserta")
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Su cuenta no tiene un rol asignado en Asserta Inventario")
     upn = (claims.get("preferred_username") or claims.get("upn") or claims.get("oid") or "").lower()
     user = CurrentUser(upn=upn, name=claims.get("name"), role=role, oid=claims.get("oid"))
     _touch_user(db, user)

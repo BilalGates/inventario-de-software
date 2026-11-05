@@ -442,8 +442,8 @@ def verify_import(path: Path, period: str, backup_dir: Path) -> dict:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Importa una exportacion completa de Inventario Asserta.")
-    parser.add_argument("--file", required=True, type=Path, help="Ruta al Excel exportado por Inventario Asserta.")
+    parser = argparse.ArgumentParser(description="Importa una exportacion completa de Asserta Inventario.")
+    parser.add_argument("--file", required=True, type=Path, help="Ruta al Excel exportado por Asserta Inventario.")
     parser.add_argument("--period", help="Periodo YYYY-MM; si se omite, se toma del nombre del fichero.")
     parser.add_argument("--apply", action="store_true", help="Confirma la escritura. Sin esta opcion solo valida.")
     parser.add_argument("--verify-only", action="store_true", help="Compara el Excel con los conteos guardados.")

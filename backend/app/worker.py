@@ -152,7 +152,7 @@ def tick(settings=None) -> dict:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Worker de Inventario Asserta")
+    parser = argparse.ArgumentParser(description="Worker de Asserta Inventario")
     parser.add_argument("--once", action="store_true")
     args = parser.parse_args()
     setup_logging()
