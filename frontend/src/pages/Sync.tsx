@@ -48,7 +48,7 @@ export default function Sync() {
 
   return (
     <>
-      <PageHeader title="Sincronización" description="Conectores, ejecuciones e importación de ficheros. Todas las ejecuciones las procesa el worker." />
+      <PageHeader eyebrow="Fuentes · Sincronización" title="Sincronización" description="Conectores, ejecuciones e importación de ficheros. Todas las ejecuciones las procesa el worker." />
       {sources.isLoading ? <Spinner /> : sources.error ? <ErrorState error={sources.error} /> : (
         <div className="mb-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {sources.data!.filter((s) => s.code !== "legacy").map((s) => (
@@ -119,7 +119,7 @@ function GraphConnection({ source }: { source: Source }) {
     <>
       {source.graph_auth === "delegated" ? (
         <p className="mt-3 text-xs text-muted">Conectado como <span className="font-medium text-fg">{source.graph_account ?? "cuenta de Microsoft"}</span>
-          {can.admin && <> · <button className="text-accent hover:underline" onClick={() => setConfirmOff(true)}>Desconectar</button></>}</p>
+          {can.admin && <> · <button className="link" onClick={() => setConfirmOff(true)}>Desconectar</button></>}</p>
       ) : can.admin && (
         <div className="mt-3"><Button size="sm" icon={<LogIn className="size-3.5" />} loading={connect.isPending}
           onClick={() => connect.mutate(undefined)}>Conectar con Microsoft</Button></div>
@@ -132,7 +132,7 @@ function GraphConnection({ source }: { source: Source }) {
           <Notice tone="danger" title="No se pudo conectar">{status.data?.error ?? "El código ha caducado."} Cierre y vuelva a intentarlo.</Notice>
         ) : (
           <div className="space-y-3 text-sm">
-            <p>1. Abra <a className="text-accent hover:underline" href={code.verification_uri} target="_blank" rel="noreferrer">{code.verification_uri}</a></p>
+            <p>1. Abra <a className="link" href={code.verification_uri} target="_blank" rel="noreferrer">{code.verification_uri}</a></p>
             <p>2. Escriba este código e inicie sesión con una cuenta con acceso a Intune:</p>
             <div className="flex items-center gap-2">
               <code className="rounded-md bg-subtle px-3 py-2 font-mono text-lg tracking-widest">{code.user_code}</code>

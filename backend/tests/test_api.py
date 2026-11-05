@@ -231,7 +231,30 @@ def test_failed_run_retry_and_dashboard(client, db):
     assert client.post(f"/api/runs/{run['id']}/retry").status_code == 202
     dash = client.get("/api/dashboard").json()
     assert dash["alerts"]["open"] >= 1 and dash["monthly"]["period"]
+    daily = dash["changes_daily"]
+    assert len(daily) == 30 and daily[-1]["date"] == dash["generated_at"][:10]
+    assert set(daily[0]) == {"date", "installed", "removed", "updated"}
     assert db.execute(select(Alert).where(Alert.alert_type == "sync_failed")).scalars().first()
+
+
+def test_dashboard_daily_software_activity(client, db):
+    from datetime import timedelta
+
+    from app.db import utcnow
+    from app.models import InventoryChange
+
+    now = utcnow()
+    db.add_all([InventoryChange(change_type="software_installed", detected_at=now),
+                InventoryChange(change_type="software_installed", detected_at=now),
+                InventoryChange(change_type="software_removed", detected_at=now - timedelta(days=2)),
+                InventoryChange(change_type="software_version_changed", detected_at=now - timedelta(days=2)),
+                InventoryChange(change_type="device_added", detected_at=now),
+                InventoryChange(change_type="software_installed", detected_at=now - timedelta(days=40))])
+    db.commit()
+    daily = client.get("/api/dashboard").json()["changes_daily"]
+    assert daily[-1] == {"date": now.strftime("%Y-%m-%d"), "installed": 2, "removed": 0, "updated": 0}
+    assert daily[-3]["removed"] == 1 and daily[-3]["updated"] == 1
+    assert sum(d["installed"] for d in daily) == 2  # lo de hace 40 días queda fuera
 
 
 def test_audit_endpoints(client, db):

@@ -17,7 +17,7 @@ const PAGE_SIZE = 50;
 
 const columns: Column<DeviceRow>[] = [
   { id: "name", header: "Equipo", sortKey: "name", cell: (d) => (
-    <Link to={`/dispositivos/${d.id}`} className="font-medium text-fg hover:text-accent hover:underline">{d.name}</Link>
+    <Link to={`/dispositivos/${d.id}`} className="code text-[13px] font-medium text-fg hover:underline hover:underline-offset-4">{d.name}</Link>
   ) },
   { id: "serial", header: "Nº de serie", sortKey: "serial_number",
     cell: (d) => <span className="font-mono text-xs">{d.serial_number ?? "—"}</span> },
@@ -62,7 +62,7 @@ export default function Devices() {
 
   return (
     <>
-      <PageHeader title="Dispositivos" description="Activos tecnológicos con identidad única, de Intune, Panda o alta manual."
+      <PageHeader eyebrow="Inventario · Dispositivos" title="Dispositivos" description="Activos tecnológicos con identidad única, de Intune, Panda o alta manual."
         actions={<>
           <Button icon={<Download className="size-4" />}
             onClick={() => api.download("/devices/export", { ...values, format: "xlsx", q: values.q })}>Exportar</Button>

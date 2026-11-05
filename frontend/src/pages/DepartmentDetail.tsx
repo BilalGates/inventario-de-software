@@ -52,7 +52,7 @@ export default function DepartmentDetail() {
           <Button icon={<Pencil className="size-4" />} onClick={() => setEditing(true)}>Editar</Button>
           <Button variant="ghost" icon={<Power className="size-4" />} onClick={() => setToggling(true)}>{d.active ? "Desactivar" : "Activar"}</Button>
         </>}>
-        <Link to="/departamentos" className="mb-2 inline-flex items-center gap-1 text-xs text-muted hover:text-fg"><ArrowLeft className="size-3" /> Departamentos</Link>
+        <Link to="/departamentos" className="eyebrow mb-2.5 inline-flex items-center gap-1.5 hover:text-fg"><ArrowLeft className="size-3" /> Departamentos</Link>
       </PageHeader>
       <div className="mb-4 grid gap-4 lg:grid-cols-3">
         <Card title="Datos" className="lg:col-span-2">

@@ -59,7 +59,7 @@ export default function SoftwareDetail() {
           <Button icon={<Pencil className="size-4" />} onClick={() => setDialog("edit")}>Editar</Button>
           <Button variant="primary" icon={<ShieldCheck className="size-4" />} onClick={() => setDialog("policy")}>Autorización</Button>
         </>}>
-        <Link to="/software" className="mb-2 inline-flex items-center gap-1 text-xs text-muted hover:text-fg"><ArrowLeft className="size-3" /> Software</Link>
+        <Link to="/software" className="eyebrow mb-2.5 inline-flex items-center gap-1.5 hover:text-fg"><ArrowLeft className="size-3" /> Software</Link>
       </PageHeader>
 
       <div className="mb-4 grid gap-4 lg:grid-cols-3">
@@ -98,7 +98,7 @@ export default function SoftwareDetail() {
           { id: "v", header: "Versión", cell: (v) => <span className="font-mono">{v.version ?? "(desconocida)"}</span> },
           { id: "d", header: "Dispositivos", align: "right", cell: (v) => v.devices },
           { id: "f", header: "Vista por primera vez", cell: (v) => fmtDate(v.first_seen_at) },
-          { id: "a", header: "", cell: (v) => v.devices > 0 && <button className="text-xs text-accent hover:underline"
+          { id: "a", header: "", cell: (v) => v.devices > 0 && <button className="link text-xs"
             onClick={() => { setVersion(v.version ?? ""); setTab("instalaciones"); }}>Ver equipos</button> },
         ]} />
       )}
@@ -163,7 +163,7 @@ function EditProduct({ p, onClose }: { p: ProductDetail; onClose: () => void }) 
           {Object.entries(CATEGORY_LABEL).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>}</Field>
         <Field label="Clasificación ENS">{(id) => <input id={id} className="field" value={v.ens_classification} onChange={(e) => setV({ ...v, ens_classification: e.target.value })} />}</Field>
         <label className="flex items-center gap-2 self-end pb-2 text-sm"><input type="checkbox" checked={v.is_relevant}
-          onChange={(e) => setV({ ...v, is_relevant: e.target.checked })} className="accent-[rgb(var(--accent))]" /> Aplicación relevante</label>
+          onChange={(e) => setV({ ...v, is_relevant: e.target.checked })} /> Aplicación relevante</label>
         <div className="sm:col-span-2"><Field label="Notas">{(id) => <textarea id={id} rows={3} className="field" value={v.notes} onChange={(e) => setV({ ...v, notes: e.target.value })} />}</Field></div>
         <div className="sm:col-span-2"><Field label="Motivo del cambio">{(id) => <input id={id} className="field" value={v.reason} onChange={(e) => setV({ ...v, reason: e.target.value })} />}</Field></div>
       </div>
@@ -252,7 +252,7 @@ function MergeDialog({ target, onClose }: { target: ProductDetail; onClose: () =
         <ul className="max-h-60 divide-y divide-border overflow-y-auto rounded-md border border-border">
           {(found.data?.items ?? []).filter((x) => x.id !== target.id).map((x) => (
             <li key={x.id}><label className="flex cursor-pointer items-center gap-2 px-3 py-2 hover:bg-subtle">
-              <input type="checkbox" checked={ids.includes(x.id)} className="accent-[rgb(var(--accent))]"
+              <input type="checkbox" checked={ids.includes(x.id)}
                 onChange={(e) => setIds(e.target.checked ? [...ids, x.id] : ids.filter((i) => i !== x.id))} />
               <span className="flex-1">{x.name}</span><span className="text-xs text-muted">{x.publisher} · {x.devices} equipos</span>
             </label></li>

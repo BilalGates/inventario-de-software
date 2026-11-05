@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { AuthBadge } from "@/components/badges";
 import { DataTable, type Column } from "@/components/DataTable";
-import { Badge, Button, Field, Modal, PageHeader } from "@/components/ui";
+import { Badge, Button, Field, Modal, PageHeader, Segmented } from "@/components/ui";
 import { api } from "@/lib/api";
 import { useCan } from "@/lib/auth";
 import { AUTH_LABEL, CATEGORY_LABEL, fmtDate } from "@/lib/format";
@@ -55,17 +55,13 @@ export default function Software() {
 
   return (
     <>
-      <PageHeader title="Software" description="Catálogo global normalizado: cada producto existe una vez, con sus versiones e instalaciones."
+      <PageHeader eyebrow="Inventario · Software" title="Catálogo de software" description="Catálogo global normalizado: cada producto existe una vez, con sus versiones e instalaciones."
         actions={<Button icon={<Download className="size-4" />}
           onClick={() => api.download("/software/export", { format: "xlsx", q: values.q, status: values.status,
             category: values.category, relevant: params.relevant, department_id: values.department_id })}>Exportar</Button>} />
-      <div className="mb-3 flex flex-wrap gap-1.5" role="group" aria-label="Vistas">
-        {Object.entries(VIEWS).map(([k, v]) => (
-          <button key={k} onClick={() => set({ view: k === "all" ? null : k })}
-            className={`rounded-full px-3 py-1 text-xs font-medium ring-1 ring-inset transition-colors ${view === k ? "bg-accent/10 text-accent ring-accent/30" : "text-muted ring-border hover:text-fg"}`}>
-            {v.label}
-          </button>
-        ))}
+      <div className="mb-3">
+        <Segmented label="Vistas" value={view} onChange={(k) => set({ view: k === "all" ? null : k })}
+          options={(Object.keys(VIEWS) as (keyof typeof VIEWS)[]).map((k) => ({ id: k, label: VIEWS[k].label }))} />
       </div>
       <DataTable
         columns={columns} rows={q.data?.items} total={q.data?.total} rowKey={(p) => p.id}

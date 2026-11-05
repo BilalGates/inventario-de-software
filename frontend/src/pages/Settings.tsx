@@ -27,7 +27,7 @@ export default function SettingsPage() {
 
   return (
     <>
-      <PageHeader title="Configuración" description="Automatizaciones, conectores, accesos y estado del sistema." />
+      <PageHeader eyebrow="Sistema · Configuración" title="Configuración" description="Automatizaciones, conectores, accesos y estado del sistema." />
       {!can.admin && <div className="mb-4"><Notice>Solo los administradores pueden modificar la configuración.</Notice></div>}
       <div className="grid gap-4 lg:grid-cols-2">
         <Schedule data={s["schedule.monthly"]} sources={(sources.data ?? []).filter((x) => x.kind === "api")} disabled={!can.admin} />
@@ -72,14 +72,14 @@ function Schedule({ data, sources, disabled }: { data: SettingsData["schedule.mo
   return (
     <Card title="Inventario mensual automático">
       <div className="space-y-4">
-        <label className="flex items-center gap-2"><input type="checkbox" disabled={disabled} checked={v.enabled} onChange={(e) => setV({ ...v, enabled: e.target.checked })} className="accent-[rgb(var(--accent))]" />
+        <label className="flex items-center gap-2"><input type="checkbox" disabled={disabled} checked={v.enabled} onChange={(e) => setV({ ...v, enabled: e.target.checked })} />
           Ejecutar automáticamente cada mes</label>
         <div className="grid grid-cols-2 gap-4">
           <Field label="Día del mes">{(id) => <input id={id} type="number" min={1} max={28} disabled={disabled} className="field" value={v.day} onChange={(e) => setV({ ...v, day: Number(e.target.value) })} />}</Field>
           <Field label="Hora (UTC)">{(id) => <input id={id} type="number" min={0} max={23} disabled={disabled} className="field" value={v.hour} onChange={(e) => setV({ ...v, hour: Number(e.target.value) })} />}</Field>
         </div>
         <fieldset><legend className="label">Fuentes a sincronizar</legend>
-          {sources.map((s) => <label key={s.code} className="flex items-center gap-2 py-0.5"><input type="checkbox" disabled={disabled} className="accent-[rgb(var(--accent))]"
+          {sources.map((s) => <label key={s.code} className="flex items-center gap-2 py-0.5"><input type="checkbox" disabled={disabled}
             checked={v.sources.includes(s.code)} onChange={(e) => setV({ ...v, sources: e.target.checked ? [...v.sources, s.code] : v.sources.filter((x) => x !== s.code) })} />{s.name}</label>)}
         </fieldset>
         <p className="text-xs text-muted">Tras las sincronizaciones se genera el borrador del inventario del mes, que IT revisa y aprueba en Auditoría.</p>
@@ -97,7 +97,7 @@ function IntuneConfig({ src, disabled }: { src: Source; disabled: boolean }) {
   return (
     <Card title="Conector Microsoft Intune">
       <div className="space-y-4">
-        <label className="flex items-center gap-2"><input type="checkbox" disabled={disabled} checked={enabled} onChange={(e) => setEnabled(e.target.checked)} className="accent-[rgb(var(--accent))]" />Conector activo</label>
+        <label className="flex items-center gap-2"><input type="checkbox" disabled={disabled} checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />Conector activo</label>
         <Field label="Lectura de software (Discovered apps)" hint="«Por aplicación» es la técnica del script PowerShell actual. «Por dispositivo» hace menos llamadas; valídela con el tenant antes de usarla.">
           {(id) => <select id={id} className="field" disabled={disabled} value={strategy} onChange={(e) => setStrategy(e.target.value)}>
             <option value="per_app">Por aplicación (lento: una llamada por programa)</option>
