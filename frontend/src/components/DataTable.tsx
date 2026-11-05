@@ -158,7 +158,7 @@ export function DataTable<T>(p: Props<T>) {
           <thead className="sticky top-0 z-10 bg-surface/95 font-mono text-2xs uppercase tracking-[0.06em] text-muted backdrop-blur">
             <tr>
               {p.selectable && (
-                <th className="w-10 px-4 py-3">
+                <th className="w-10 py-3 pl-4 pr-1">
                   <input type="checkbox" aria-label="Seleccionar todos" checked={allSelected} onChange={toggleAll} />
                 </th>
               )}
@@ -166,7 +166,7 @@ export function DataTable<T>(p: Props<T>) {
                 const dir = p.sort === c.sortKey ? "asc" : p.sort === `-${c.sortKey}` ? "desc" : null;
                 return (
                   <th key={c.id} scope="col" aria-sort={dir === "asc" ? "ascending" : dir === "desc" ? "descending" : undefined}
-                    className={cx("whitespace-nowrap border-b border-border px-4 py-3 font-medium", c.align === "right" && "text-right", c.className)}>
+                    className={cx("whitespace-nowrap border-b border-border px-3 py-3 font-medium first:pl-4 last:pr-4", c.align === "right" && "text-right", c.className)}>
                     {c.sortKey && p.onSort ? (
                       <button onClick={() => sortBy(c)} className="inline-flex items-center gap-1 uppercase hover:text-fg">
                         {c.header}
@@ -186,13 +186,13 @@ export function DataTable<T>(p: Props<T>) {
                 <tr key={k} className={cx("border-t border-border first:border-t-0 transition-colors hover:bg-bg",
                   selected.has(k) && "bg-fg/[0.04]", p.rowClassName?.(row))}>
                   {p.selectable && (
-                    <td className="px-4 py-3">
+                    <td className="py-3 pl-4 pr-1">
                       <input type="checkbox" aria-label="Seleccionar fila" checked={selected.has(k)}
                         onChange={() => toggleRow(k)} />
                     </td>
                   )}
                   {visible.map((c) => (
-                    <td key={c.id} className={cx("whitespace-nowrap px-4 py-3 align-middle", c.align === "right" && "num text-right", c.className)}>
+                    <td key={c.id} className={cx("whitespace-nowrap px-3 py-3 align-middle first:pl-4 last:pr-4", c.align === "right" && "num text-right", c.className)}>
                       {c.cell(row)}
                     </td>
                   ))}

@@ -16,26 +16,37 @@ import type { DeviceDetail, DeviceRow, Paged } from "@/lib/types";
 const PAGE_SIZE = 50;
 
 const columns: Column<DeviceRow>[] = [
-  { id: "name", header: "Equipo", sortKey: "name", cell: (d) => (
-    <Link to={`/dispositivos/${d.id}`} className="code text-[13px] font-medium text-fg hover:underline hover:underline-offset-4">{d.name}</Link>
-  ) },
+  { id: "name", header: "Equipo", sortKey: "name", cell: (d) => {
+    const model = [d.manufacturer, d.model].filter(Boolean).join(" ");
+    return (
+      <div className="min-w-0">
+        <Link to={`/dispositivos/${d.id}`} className="code text-[13px] font-medium text-fg hover:underline hover:underline-offset-4">{d.name}</Link>
+        {model && <p className="max-w-56 truncate text-xs text-muted" title={model}>{model}</p>}
+      </div>
+    );
+  } },
   { id: "serial", header: "Nº de serie", sortKey: "serial_number",
     cell: (d) => <span className="font-mono text-xs">{d.serial_number ?? "—"}</span> },
-  { id: "type", header: "Tipo", cell: (d) => d.device_type ?? <span className="text-muted">Sin clasificar</span> },
+  { id: "type", header: "Tipo", hidden: true, cell: (d) => d.device_type ?? <span className="text-muted">Sin clasificar</span> },
   { id: "department", header: "Departamento", sortKey: "department",
     cell: (d) => d.department ?? <span className="text-muted">Sin asignar</span> },
-  { id: "user", header: "Usuario", cell: (d) => <span className="block max-w-52 truncate" title={d.primary_user_upn ?? ""}>{d.primary_user ?? "—"}</span> },
-  { id: "model", header: "Modelo", sortKey: "model", cell: (d) => <span className="block max-w-48 truncate">{[d.manufacturer, d.model].filter(Boolean).join(" ") || "—"}</span> },
+  { id: "user", header: "Usuario", cell: (d) => <span className="block max-w-44 truncate" title={d.primary_user_upn ?? ""}>{d.primary_user ?? "—"}</span> },
+  { id: "model", header: "Modelo", sortKey: "model", hidden: true, cell: (d) => <span className="block max-w-48 truncate">{[d.manufacturer, d.model].filter(Boolean).join(" ") || "—"}</span> },
   { id: "os", header: "Sistema", sortKey: "os_version", hidden: true, cell: (d) => <span className="whitespace-nowrap">{[d.os_name, d.os_version].filter(Boolean).join(" ") || "—"}</span> },
   { id: "ram", header: "RAM", align: "right", hidden: true, cell: (d) => fmtBytes(d.ram_bytes, true) },
   { id: "storage", header: "Disco", align: "right", hidden: true, cell: (d) => fmtBytes(d.storage_total_bytes) },
   { id: "compliance", header: "Cumplimiento", cell: (d) => <ComplianceBadge value={d.compliance_state} /> },
   { id: "software", header: "Apps", align: "right", cell: (d) => d.software_count ?? 0 },
   { id: "status", header: "Estado", sortKey: "status", hidden: true, cell: (d) => <DeviceStatusBadge status={d.status} /> },
-  { id: "freshness", header: "Actualidad", cell: (d) => <FreshnessBadge value={d.freshness} /> },
+  { id: "freshness", header: "Actualidad", sortKey: "last_seen_at", cell: (d) => (
+    <div className="flex flex-col items-start gap-0.5">
+      <FreshnessBadge value={d.freshness} />
+      <span className="code text-2xs text-muted" title={d.last_seen_at ?? ""}>{fmtRelative(d.last_seen_at)}</span>
+    </div>
+  ) },
   { id: "sources", header: "Fuentes", hidden: true,
     cell: (d) => <div className="flex gap-1">{d.sources?.map((s) => <SourceBadge key={s} source={s} />)}</div> },
-  { id: "seen", header: "Última observación", sortKey: "last_seen_at",
+  { id: "seen", header: "Última observación", hidden: true,
     cell: (d) => <span className="whitespace-nowrap text-muted" title={d.last_seen_at ?? ""}>{fmtRelative(d.last_seen_at)}</span> },
   { id: "location", header: "Ubicación", hidden: true, cell: (d) => d.location ?? "—" },
 ];

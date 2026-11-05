@@ -100,7 +100,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   if (!state) {
     return (
       <div className="grid min-h-screen place-items-center text-muted" role="status">
-        Cargando Inventario Asserta…
+        Cargando Asserta Inventario…
       </div>
     );
   }

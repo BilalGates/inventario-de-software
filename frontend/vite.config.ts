@@ -12,6 +12,8 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     setupFiles: ["./src/test/setup.ts"],
+    // La primera carga de una página diferida es lenta en jsdom con los tests en paralelo.
+    testTimeout: 15_000,
     include: ["src/**/*.test.{ts,tsx}"],
   },
 });

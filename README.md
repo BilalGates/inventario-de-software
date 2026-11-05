@@ -1,4 +1,4 @@
-# Inventario Asserta 2.0
+# Asserta Inventario 2.0
 
 Plataforma interna de IT para el inventario de dispositivos, software, departamentos,
 autorizaciones e inventarios mensuales de Asserta Global Healthcare Solutions.

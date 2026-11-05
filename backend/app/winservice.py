@@ -36,8 +36,8 @@ import win32serviceutil  # noqa: E402
 
 class InventarioService(win32serviceutil.ServiceFramework):
     _svc_name_ = "InventarioAsserta"
-    _svc_display_name_ = "Inventario Asserta"
-    _svc_description_ = "Inventario IT de Asserta: interfaz web en http://127.0.0.1:8180 y sincronizaciones programadas."
+    _svc_display_name_ = "Asserta Inventario"
+    _svc_description_ = "Asserta Inventario: interfaz web en http://127.0.0.1:8180 y sincronizaciones programadas."
     # Lo aloja el python.exe BASE (junto a su DLL); el pythonservice.exe que pywin32 copia al
     # .venv no encuentra python3xx.dll.
     _exe_name_ = getattr(sys, "_base_executable", sys.executable)
@@ -71,11 +71,11 @@ class InventarioService(win32serviceutil.ServiceFramework):
         win32job.AssignProcessToJobObject(self.job, handle)
 
     def SvcDoRun(self):  # noqa: N802
-        servicemanager.LogInfoMsg("Inventario Asserta: iniciando")
+        servicemanager.LogInfoMsg("Asserta Inventario: iniciando")
         try:
             self._start_child()
         except Exception as exc:  # noqa: BLE001
-            servicemanager.LogErrorMsg(f"Inventario Asserta no pudo lanzar la aplicación: {exc}")
+            servicemanager.LogErrorMsg(f"Asserta Inventario no pudo lanzar la aplicación: {exc}")
             os._exit(1)
         failed = False
         # Espera la orden de parada; si la aplicación cae, el servicio termina con error y
@@ -89,7 +89,7 @@ class InventarioService(win32serviceutil.ServiceFramework):
         if self.proc.poll() is None:
             self.proc.terminate()
         win32api.CloseHandle(self.job)  # termina también cualquier subproceso
-        servicemanager.LogInfoMsg("Inventario Asserta: detenido")
+        servicemanager.LogInfoMsg("Asserta Inventario: detenido")
         if failed:
             os._exit(1)  # salida con error para que actúe el reinicio automático
 

@@ -28,9 +28,10 @@ const VIEWS = {
 
 const columns: Column<Product>[] = [
   { id: "name", header: "Producto", sortKey: "name", cell: (p) => (
-    <Link to={`/software/${p.id}`} className="font-medium hover:text-accent hover:underline">{p.name}</Link>
+    <Link to={`/software/${p.id}`} title={p.name}
+      className="block max-w-[22rem] truncate font-medium hover:underline hover:underline-offset-4 2xl:max-w-xl">{p.name}</Link>
   ) },
-  { id: "publisher", header: "Editor", sortKey: "publisher", cell: (p) => <span className="block max-w-56 truncate">{p.publisher ?? "—"}</span> },
+  { id: "publisher", header: "Editor", sortKey: "publisher", cell: (p) => <span className="block max-w-48 truncate" title={p.publisher ?? ""}>{p.publisher ?? "—"}</span> },
   { id: "category", header: "Categoría", cell: (p) => <span className="text-muted">{CATEGORY_LABEL[p.category] ?? p.category}</span> },
   { id: "status", header: "Autorización", sortKey: "status", cell: (p) => <AuthBadge status={p.authorization_status} /> },
   { id: "devices", header: "Dispositivos", sortKey: "devices", align: "right", cell: (p) => p.devices },

@@ -1,4 +1,4 @@
-"""Aplicación web de Inventario Asserta 2.0.
+"""Aplicación web de Asserta Inventario 2.0.
 
     uvicorn app.main:app --host 127.0.0.1 --port 8000
 """
@@ -25,7 +25,7 @@ def create_app() -> FastAPI:
     settings = get_settings()
     setup_logging()
     docs = settings.environment != "production"
-    app = FastAPI(title="Inventario Asserta API", version=VERSION, docs_url="/api/docs" if docs else None,
+    app = FastAPI(title="Asserta Inventario API", version=VERSION, docs_url="/api/docs" if docs else None,
                   redoc_url=None, openapi_url="/api/openapi.json" if docs else None)
 
     if settings.environment == "development":
