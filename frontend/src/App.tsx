@@ -29,7 +29,7 @@ export function App() {
           <Route path="/auditoria" element={<Audit />} />
           <Route path="/sincronizacion" element={<Sync />} />
           <Route path="/configuracion" element={<SettingsPage />} />
-          <Route path="*" element={<EmptyState title="Página no encontrada"><Link className="text-accent" to="/">Volver al panel</Link></EmptyState>} />
+          <Route path="*" element={<EmptyState title="Página no encontrada"><Link className="link" to="/">Volver al panel</Link></EmptyState>} />
         </Routes>
       </Suspense>
     </AppShell>

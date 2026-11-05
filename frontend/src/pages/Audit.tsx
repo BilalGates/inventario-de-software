@@ -18,7 +18,7 @@ export default function Audit() {
   const tab = (params.get("tab") ?? "mensual") as Tab;
   return (
     <>
-      <PageHeader title="Auditoría" description="Inventarios mensuales, cambios detectados, incidencias y evidencias trazables." />
+      <PageHeader eyebrow="Control · Auditoría" title="Auditoría" description="Inventarios mensuales, cambios detectados, incidencias y evidencias trazables." />
       <Tabs value={tab} onChange={(t) => setParams({ tab: t })} tabs={[
         { id: "mensual", label: "Inventarios mensuales" }, { id: "cambios", label: "Cambios" },
         { id: "alertas", label: "Alertas" }, { id: "revision", label: "Casos de revisión" }, { id: "registro", label: "Registro de auditoría" },
@@ -109,7 +109,7 @@ function ReviewSnapshot({ snap, onClose }: { snap: Snapshot; onClose: () => void
         {!snap.is_complete && (
           <Notice tone="warn" title="Inventario incompleto">
             Alguna fuente esencial no completó la recogida. Lo recomendable es reintentar la sincronización y regenerar el inventario.
-            <label className="mt-2 flex items-center gap-2"><input type="checkbox" checked={accept} onChange={(e) => setAccept(e.target.checked)} className="accent-[rgb(var(--accent))]" />
+            <label className="mt-2 flex items-center gap-2"><input type="checkbox" checked={accept} onChange={(e) => setAccept(e.target.checked)} />
               Acepto aprobarlo incompleto (requiere justificación)</label>
           </Notice>
         )}
@@ -207,9 +207,9 @@ function Alerts() {
     { id: "title", header: "Incidencia", cell: (a) => <div className="min-w-0"><p className="font-medium">{a.title}</p>
       {a.detail && <p className="line-clamp-2 text-xs text-muted">{a.detail}</p>}</div> },
     { id: "link", header: "Relacionado", cell: (a) => <div className="flex flex-col text-xs">
-      {a.device_id && <Link className="text-accent hover:underline" to={`/dispositivos/${a.device_id}`}>Dispositivo</Link>}
-      {a.product_id && <Link className="text-accent hover:underline" to={`/software/${a.product_id}`}>Producto</Link>}
-      {a.run_id && <Link className="text-accent hover:underline" to={`/sincronizacion?run=${a.run_id}`}>Ejecución #{a.run_id}</Link>}</div> },
+      {a.device_id && <Link className="link" to={`/dispositivos/${a.device_id}`}>Dispositivo</Link>}
+      {a.product_id && <Link className="link" to={`/software/${a.product_id}`}>Producto</Link>}
+      {a.run_id && <Link className="link" to={`/sincronizacion?run=${a.run_id}`}>Ejecución #{a.run_id}</Link>}</div> },
     { id: "when", header: "Detectada", cell: (a) => <span className="whitespace-nowrap text-muted" title={`Vista por última vez ${fmtDateTime(a.last_seen_at)}`}>{fmtRelative(a.created_at)}</span> },
     { id: "status", header: "Estado", cell: (a) => a.status === "resolved"
       ? <span className="text-xs text-muted" title={a.resolution ?? ""}>Resuelta por {a.resolved_by}</span>
@@ -266,7 +266,7 @@ function ReviewCases() {
         empty={<EmptyState title="No hay casos pendientes" icon={<CheckCircle2 className="size-5 text-ok" />} />}
         columns={[
           { id: "s", header: "Caso", cell: (c) => <span className="font-medium">{c.summary}</span> },
-          { id: "d", header: "Dispositivos", cell: (c) => <div className="flex gap-2">{ids(c).map((i) => <Link key={i} className="text-accent hover:underline" to={`/dispositivos/${i}`}>#{i}</Link>)}</div> },
+          { id: "d", header: "Dispositivos", cell: (c) => <div className="flex gap-2">{ids(c).map((i) => <Link key={i} className="link" to={`/dispositivos/${i}`}>#{i}</Link>)}</div> },
           { id: "w", header: "Detectado", cell: (c) => <span className="text-muted">{fmtRelative(c.created_at)}</span> },
           { id: "a", header: "", cell: (c) => can.write && <Button size="sm" onClick={() => { setOpen(c); setForm({ action: "dismiss", note: "", keep: String(ids(c)[0] ?? ""), merge: String(ids(c)[1] ?? "") }); }}>Resolver</Button> },
         ]} />

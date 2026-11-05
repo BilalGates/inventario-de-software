@@ -90,7 +90,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         <div className="card max-w-md p-6 text-center">
           <h1 className="text-base font-semibold">No se pudo iniciar sesión</h1>
           <p className="mt-2 text-muted">{error}</p>
-          <button className="mt-4 text-accent underline" onClick={() => window.location.reload()}>
+          <button className="link mt-4" onClick={() => window.location.reload()}>
             Reintentar
           </button>
         </div>

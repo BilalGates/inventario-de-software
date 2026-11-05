@@ -64,7 +64,7 @@ export function UploadDialog({ source, deviceId, deviceName, onClose }: {
         </Field>
         {source === "intune" && (
           <label className="flex items-start gap-2 text-sm">
-            <input type="checkbox" checked={complete} onChange={(e) => setComplete(e.target.checked)} className="mt-0.5 accent-[rgb(var(--accent))]" />
+            <input type="checkbox" checked={complete} onChange={(e) => setComplete(e.target.checked)} className="mt-0.5" />
             <span>La exportación de aplicaciones es completa para los equipos que contiene.
               <span className="block text-xs text-muted">Solo entonces se registrarán como desinstaladas las aplicaciones que falten.</span></span>
           </label>

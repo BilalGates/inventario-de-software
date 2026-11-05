@@ -59,7 +59,7 @@ export default function DeviceDetail() {
           <Button variant={retired ? "secondary" : "ghost"} icon={retired ? <RotateCcw className="size-4" /> : <Archive className="size-4" />}
             onClick={() => setRetiring(true)}>{retired ? "Reactivar" : "Dar de baja"}</Button>
         </>}>
-        <Link to="/dispositivos" className="mb-2 inline-flex items-center gap-1 text-xs text-muted hover:text-fg">
+        <Link to="/dispositivos" className="eyebrow mb-2.5 inline-flex items-center gap-1.5 hover:text-fg">
           <ArrowLeft className="size-3" /> Dispositivos
         </Link>
       </PageHeader>
@@ -177,11 +177,11 @@ function DeviceSoftware({ id }: { id: number }) {
       rowClassName={(s) => (s.present ? undefined : "opacity-60")}
       toolbar={<>
         <label className="flex items-center gap-1.5 text-sm text-muted">
-          <input type="checkbox" checked={onlyRelevant} onChange={(e) => setOnlyRelevant(e.target.checked)} className="accent-[rgb(var(--accent))]" />
+          <input type="checkbox" checked={onlyRelevant} onChange={(e) => setOnlyRelevant(e.target.checked)} />
           Solo aplicaciones (sin componentes del sistema)
         </label>
         <label className="flex items-center gap-1.5 text-sm text-muted">
-          <input type="checkbox" checked={removed} onChange={(e) => setRemoved(e.target.checked)} className="accent-[rgb(var(--accent))]" />
+          <input type="checkbox" checked={removed} onChange={(e) => setRemoved(e.target.checked)} />
           Incluir desinstalado
         </label>
       </>}

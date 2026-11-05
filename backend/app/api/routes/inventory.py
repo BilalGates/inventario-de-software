@@ -697,6 +697,23 @@ def dashboard(db: Session = Depends(get_db), _: CurrentUser = Reader):
     changes_30 = dict(db.execute(select(InventoryChange.change_type, func.count())
                                  .where(InventoryChange.detected_at >= since_30)
                                  .group_by(InventoryChange.change_type)).all())
+    # Serie diaria de actividad de software (instalaciones, desinstalaciones y cambios de versión).
+    day = func.date(InventoryChange.detected_at)
+    daily_types = ("software_installed", "software_removed", "software_version_changed")
+    daily_rows = db.execute(select(day, InventoryChange.change_type, func.count())
+                            .where(InventoryChange.detected_at >= since_30,
+                                   InventoryChange.change_type.in_(daily_types))
+                            .group_by(day, InventoryChange.change_type)).all()
+    by_day: dict[str, dict[str, int]] = {}
+    for d, kind, n in daily_rows:
+        by_day.setdefault(str(d)[:10], {})[kind] = n
+    changes_daily = []
+    for i in range(29, -1, -1):
+        key = (now - timedelta(days=i)).strftime("%Y-%m-%d")
+        counts = by_day.get(key, {})
+        changes_daily.append({"date": key, "installed": counts.get("software_installed", 0),
+                              "removed": counts.get("software_removed", 0),
+                              "updated": counts.get("software_version_changed", 0)})
     dept_rows = db.execute(select(Department.name, func.count(Device.id)).join(
         Device, (Device.department_id == Department.id) & active).group_by(Department.name)
         .order_by(func.count(Device.id).desc())).all()
@@ -715,6 +732,7 @@ def dashboard(db: Session = Depends(get_db), _: CurrentUser = Reader):
         "runs": [_run(r) for r in recent_runs],
         "changes": [_change(c) for c in recent_changes],
         "changes_30d": changes_30,
+        "changes_daily": changes_daily,
         "departments": [{"name": n, "devices": c} for n, c in dept_rows],
         "worker_heartbeat": hb.value if hb else None,
         "open_review_cases": scalar(select(func.count()).select_from(ReviewCase).where(ReviewCase.status == "open")),

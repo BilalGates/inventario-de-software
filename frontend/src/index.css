@@ -1,37 +1,62 @@
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/inter-tight";
+@import "@fontsource-variable/jetbrains-mono";
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* Tokens de diseño: paleta neutra con un único acento y colores funcionales. */
+/*
+ * Tokens de diseño. Base neutra cálida (piedra) en tinta y grises; un único color de señal
+ * (bermellón) reservado para lo que requiere atención. Los gráficos usan la escala chart-1..4.
+ */
 :root {
-  --bg: 247 248 249;
+  --bg: 247 246 244;
   --surface: 255 255 255;
-  --subtle: 241 243 245;
-  --border: 226 229 233;
-  --fg: 17 24 39;
-  --muted: 100 109 122;
-  --accent: 15 118 110;
+  --subtle: 243 241 238;
+  --border: 231 229 226;
+  --border-strong: 214 211 207;
+  --fg: 28 25 23;
+  --fg-2: 68 64 60;
+  --muted: 107 101 96;
+  --accent: 28 25 23;
   --accent-fg: 255 255 255;
-  --ok: 21 128 61;
-  --warn: 180 83 9;
-  --danger: 190 18 60;
-  --info: 37 99 235;
+  --signal: 194 65 12;
+  --signal-fill: 228 87 46;
+  --ok: 54 95 61;
+  --warn: 161 98 7;
+  --danger: 194 65 12;
+  --info: 71 85 105;
+  --chart-1: 28 25 23;
+  --chart-2: 107 101 96;
+  --chart-3: 181 176 170;
+  --chart-4: 226 223 219;
+  --side: 20 19 18;
   color-scheme: light;
 }
 
 .dark {
-  --bg: 12 14 17;
-  --surface: 20 23 27;
-  --subtle: 28 32 38;
-  --border: 41 46 54;
-  --fg: 232 235 239;
-  --muted: 148 156 168;
-  --accent: 45 212 191;
-  --accent-fg: 4 47 46;
-  --ok: 74 222 128;
-  --warn: 251 191 36;
-  --danger: 251 113 133;
-  --info: 96 165 250;
+  --bg: 14 13 12;
+  --surface: 22 21 20;
+  --subtle: 30 28 27;
+  --border: 41 39 37;
+  --border-strong: 58 55 52;
+  --fg: 243 242 240;
+  --fg-2: 214 211 207;
+  --muted: 163 158 152;
+  --accent: 243 242 240;
+  --accent-fg: 20 19 18;
+  --signal: 255 138 92;
+  --signal-fill: 240 106 61;
+  --ok: 134 196 140;
+  --warn: 230 180 60;
+  --danger: 255 138 92;
+  --info: 148 163 184;
+  --chart-1: 243 242 240;
+  --chart-2: 163 158 152;
+  --chart-3: 94 89 84;
+  --chart-4: 46 43 41;
+  --side: 9 8 8;
   color-scheme: dark;
 }
 
@@ -41,20 +66,33 @@
     @apply bg-bg text-fg font-sans text-sm antialiased;
     font-feature-settings: "cv11", "ss01", "tnum";
   }
-  :focus-visible { @apply outline-none ring-2 ring-accent/60 ring-offset-1 ring-offset-bg; }
-  ::selection { @apply bg-accent/20; }
+  :focus-visible { @apply outline-none ring-2 ring-fg/70 ring-offset-2 ring-offset-bg; }
+  ::selection { @apply bg-fg/15; }
+  button:not(:disabled), summary, select { cursor: pointer; }
+  input[type="checkbox"], input[type="radio"] { accent-color: rgb(var(--fg)); }
 }
 
 @layer components {
-  .card { @apply rounded-lg border border-border bg-surface; }
+  .card { @apply rounded-panel border border-border bg-surface; }
   .label { @apply mb-1 block text-xs font-medium text-muted; }
   .field {
-    @apply h-9 w-full rounded-md border border-border bg-surface px-3 text-sm text-fg placeholder:text-muted/70
-      transition-colors hover:border-muted/50 focus:border-accent disabled:opacity-60;
+    @apply h-10 w-full rounded-md border border-border-strong bg-surface px-3 text-sm text-fg placeholder:text-muted
+      transition-colors hover:border-muted focus:border-fg disabled:opacity-60;
   }
   textarea.field { @apply h-auto py-2; }
   .kbd { @apply rounded border border-border bg-subtle px-1.5 py-0.5 font-mono text-2xs text-muted; }
   .num { font-variant-numeric: tabular-nums; }
+  /* Cifras y títulos: Inter Tight con tracking cerrado. */
+  .disp { @apply font-display; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+  /* Etiqueta de sección en monoespaciada y versalitas. */
+  .eyebrow { @apply font-mono text-2xs font-medium uppercase text-muted; letter-spacing: 0.08em; }
+  /* Identificadores (equipos, versiones, horas). */
+  .code { @apply font-mono text-xs; }
+  .link { @apply text-fg-2 underline decoration-border-strong underline-offset-4 transition-colors hover:decoration-fg; }
 }
 
-dialog::backdrop { background: rgb(0 0 0 / 0.45); backdrop-filter: blur(2px); }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; }
+}
+
+dialog::backdrop { background: rgb(20 19 18 / 0.5); backdrop-filter: blur(2px); }

@@ -112,7 +112,7 @@ export function DataTable<T>(p: Props<T>) {
 
   return (
     <div className="card overflow-hidden">
-      <div className="flex flex-wrap items-center gap-2 border-b border-border p-2.5">
+      <div className="flex flex-wrap items-center gap-2 border-b border-border p-3">
         {p.onSearch && (
           <div className="relative min-w-52 flex-1 sm:max-w-xs">
             <Search className="pointer-events-none absolute left-2.5 top-2.5 size-4 text-muted" aria-hidden />
@@ -129,8 +129,8 @@ export function DataTable<T>(p: Props<T>) {
         {p.toolbar}
         <div className="ml-auto flex items-center gap-2">
           {selected.size > 0 && p.bulkActions && (
-            <div className="flex items-center gap-2 rounded-md bg-accent/10 px-2 py-1">
-              <span className="text-xs font-medium text-accent">{selected.size} seleccionados</span>
+            <div className="flex items-center gap-2 rounded-md bg-fg px-2 py-1 text-bg [&_button]:text-bg">
+              <span className="text-xs font-medium">{selected.size} seleccionados</span>
               {p.bulkActions}
             </div>
           )}
@@ -140,11 +140,10 @@ export function DataTable<T>(p: Props<T>) {
               Columnas
             </Button>
             {showCols && (
-              <div className="card absolute right-0 z-20 mt-1 w-56 p-1.5 shadow-lg">
+              <div className="absolute right-0 z-20 mt-1 w-56 rounded-md border border-border bg-surface p-1.5 shadow-[0_8px_24px_rgb(0_0_0/0.08)]">
                 {p.columns.map((c) => (
                   <label key={c.id} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 hover:bg-subtle">
-                    <input type="checkbox" checked={!hidden.has(c.id)} onChange={() => toggleCol(c.id)}
-                      className="accent-[rgb(var(--accent))]" />
+                    <input type="checkbox" checked={!hidden.has(c.id)} onChange={() => toggleCol(c.id)} />
                     {c.header}
                   </label>
                 ))}
@@ -156,21 +155,20 @@ export function DataTable<T>(p: Props<T>) {
 
       <div className="overflow-x-auto">
         <table className="w-full border-collapse text-left">
-          <thead className="sticky top-0 z-10 bg-subtle/80 text-xs text-muted backdrop-blur">
+          <thead className="sticky top-0 z-10 bg-surface/95 font-mono text-2xs uppercase tracking-[0.06em] text-muted backdrop-blur">
             <tr>
               {p.selectable && (
-                <th className="w-9 px-3 py-2">
-                  <input type="checkbox" aria-label="Seleccionar todos" checked={allSelected} onChange={toggleAll}
-                    className="accent-[rgb(var(--accent))]" />
+                <th className="w-10 px-4 py-3">
+                  <input type="checkbox" aria-label="Seleccionar todos" checked={allSelected} onChange={toggleAll} />
                 </th>
               )}
               {visible.map((c) => {
                 const dir = p.sort === c.sortKey ? "asc" : p.sort === `-${c.sortKey}` ? "desc" : null;
                 return (
                   <th key={c.id} scope="col" aria-sort={dir === "asc" ? "ascending" : dir === "desc" ? "descending" : undefined}
-                    className={cx("whitespace-nowrap px-3 py-2 font-medium", c.align === "right" && "text-right", c.className)}>
+                    className={cx("whitespace-nowrap border-b border-border px-4 py-3 font-medium", c.align === "right" && "text-right", c.className)}>
                     {c.sortKey && p.onSort ? (
-                      <button onClick={() => sortBy(c)} className="inline-flex items-center gap-1 hover:text-fg">
+                      <button onClick={() => sortBy(c)} className="inline-flex items-center gap-1 uppercase hover:text-fg">
                         {c.header}
                         {dir === "asc" && <ArrowUp className="size-3" aria-hidden />}
                         {dir === "desc" && <ArrowDown className="size-3" aria-hidden />}
@@ -185,16 +183,16 @@ export function DataTable<T>(p: Props<T>) {
             {!p.loading && !p.error && rows.map((row) => {
               const k = p.rowKey(row);
               return (
-                <tr key={k} className={cx("border-t border-border transition-colors hover:bg-subtle/60",
-                  selected.has(k) && "bg-accent/5", p.rowClassName?.(row))}>
+                <tr key={k} className={cx("border-t border-border first:border-t-0 transition-colors hover:bg-bg",
+                  selected.has(k) && "bg-fg/[0.04]", p.rowClassName?.(row))}>
                   {p.selectable && (
-                    <td className="px-3 py-2">
+                    <td className="px-4 py-3">
                       <input type="checkbox" aria-label="Seleccionar fila" checked={selected.has(k)}
-                        onChange={() => toggleRow(k)} className="accent-[rgb(var(--accent))]" />
+                        onChange={() => toggleRow(k)} />
                     </td>
                   )}
                   {visible.map((c) => (
-                    <td key={c.id} className={cx("whitespace-nowrap px-3 py-2 align-middle", c.align === "right" && "num text-right", c.className)}>
+                    <td key={c.id} className={cx("whitespace-nowrap px-4 py-3 align-middle", c.align === "right" && "num text-right", c.className)}>
                       {c.cell(row)}
                     </td>
                   ))}
@@ -210,14 +208,14 @@ export function DataTable<T>(p: Props<T>) {
       </div>
 
       {p.onPage && total > 0 && (
-        <div className="flex items-center justify-between gap-2 border-t border-border px-3 py-2 text-xs text-muted">
-          <span className="num">
+        <div className="flex items-center justify-between gap-2 border-t border-border px-4 py-2.5 text-xs text-muted">
+          <span className="code">
             {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} de {total.toLocaleString("es-ES")}
           </span>
           <div className="flex items-center gap-1">
             <Button size="sm" variant="ghost" aria-label="Página anterior" disabled={page <= 1}
               onClick={() => p.onPage!(page - 1)}><ChevronLeft className="size-4" /></Button>
-            <span className="num px-1">{page} / {pages}</span>
+            <span className="code px-1">{page} / {pages}</span>
             <Button size="sm" variant="ghost" aria-label="Página siguiente" disabled={page >= pages}
               onClick={() => p.onPage!(page + 1)}><ChevronRight className="size-4" /></Button>
           </div>
