@@ -15,8 +15,32 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: "3.12", cache: pip }
       - run: pip install -r requirements-dev.txt
-      - run: ruff check app tests alembic/env.py
+      - run: ruff check app tests alembic/env.py ../api
       - run: pytest
+
+  backend-postgres:
+    # Misma batería contra PostgreSQL 16 (Supabase): detecta lo que SQLite tolera y Postgres no.
+    name: Backend 2.0 (PostgreSQL)
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: backend } }
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env: { POSTGRES_USER: inventario, POSTGRES_PASSWORD: inventario, POSTGRES_DB: inventario_test }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U inventario -d inventario_test" --health-interval 5s --health-retries 10
+    env:
+      INV_TEST_DATABASE_URL: postgresql://inventario:inventario@localhost:5432/inventario_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12", cache: pip }
+      - run: pip install -r requirements-dev.txt
+      - run: pytest
+      - name: Migraciones de Alembic sobre PostgreSQL
+        env: { INV_DATABASE_URL: "postgresql://inventario:inventario@localhost:5432/inventario_test" }
+        run: python -c "import app.db as d, app.models; d.Base.metadata.drop_all(d.make_engine(__import__('os').environ['INV_DATABASE_URL']))" && alembic upgrade head
 
   frontend:
     name: Frontend + E2E

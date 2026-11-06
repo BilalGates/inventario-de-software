@@ -24,6 +24,8 @@ export interface DashboardData {
   changes_weekly?: WeekActivity[];
   departments: { name: string; devices: number }[];
   worker_heartbeat: { at: string } | null;
+  /** Cada cuánto pasa el worker (1 = continuo en local; 60 = cada hora en la nube). */
+  worker_interval_minutes?: number;
   open_review_cases: number;
 }
 

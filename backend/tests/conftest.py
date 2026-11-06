@@ -14,16 +14,25 @@ from app import db as dbmod  # noqa: E402
 from app.models import *  # noqa: E402,F403
 from app.services.bootstrap import ensure_reference_data  # noqa: E402
 
+# Con INV_TEST_DATABASE_URL (PostgreSQL de pruebas, cuyo nombre debe contener "test") los tests se
+# ejecutan contra esa base: el esquema se borra y se recrea en cada test.
+PG_TEST_URL = os.environ.get("INV_TEST_DATABASE_URL", "")
+
 
 @pytest.fixture()
 def engine():
     from sqlalchemy import create_engine, event
 
-    eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool, future=True)
+    if PG_TEST_URL:
+        assert "test" in PG_TEST_URL.rsplit("/", 1)[-1], "INV_TEST_DATABASE_URL debe apuntar a una base de pruebas"
+        eng = dbmod.make_engine(PG_TEST_URL)
+        dbmod.Base.metadata.drop_all(eng)
+    else:
+        eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool, future=True)
 
-    @event.listens_for(eng, "connect")
-    def _fk(conn, _):
-        conn.execute("PRAGMA foreign_keys=ON")
+        @event.listens_for(eng, "connect")
+        def _fk(conn, _):
+            conn.execute("PRAGMA foreign_keys=ON")
 
     dbmod.Base.metadata.create_all(eng)
     dbmod.configure(eng)

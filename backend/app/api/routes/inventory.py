@@ -41,9 +41,11 @@ from app.models import (
 from app.services import audit, snapshots
 from app.services import runs as run_service
 from app.services.bootstrap import get_setting
+from app.services.dispatch import wake_worker
 
 router = APIRouter(prefix="/api", tags=["Inventario"])
-MAX_UPLOAD = 20 * 1024 * 1024
+# Vercel limita el cuerpo de las peticiones a 4,5 MB; fuera de la nube se admiten 20 MB.
+MAX_UPLOAD = (4 if get_settings().serverless else 20) * 1024 * 1024
 
 
 # --------------------------------------------------------------------------- ejecuciones
@@ -99,6 +101,7 @@ def start_sync(body: SyncIn, db: Session = Depends(get_db), user: CurrentUser = 
         raise HTTPException(409, "El conector de Intune no tiene credenciales configuradas (ver docs/integrations.md)")
     run = run_service.enqueue(db, src.code, "manual", user.upn)
     db.commit()
+    wake_worker()
     return _run(run)
 
 
@@ -109,7 +112,7 @@ async def upload_file(source: str = Form(..., pattern="^(panda|intune)$"), file:
     """Ingesta de ficheros: exportación de Panda (un equipo) o CSV de Intune (dispositivos o aplicaciones)."""
     raw = await file.read(MAX_UPLOAD + 1)
     if len(raw) > MAX_UPLOAD:
-        raise HTTPException(413, "Fichero demasiado grande (máx. 20 MB)")
+        raise HTTPException(413, f"Fichero demasiado grande (máx. {MAX_UPLOAD // (1024 * 1024)} MB)")
     try:
         content = decode(raw)
     except Exception as exc:
@@ -121,6 +124,7 @@ async def upload_file(source: str = Form(..., pattern="^(panda|intune)$"), file:
         params["device_id"] = device_id
     run = run_service.enqueue(db, source, "upload", user.upn, params)
     db.commit()
+    wake_worker()
     return _run(run)
 
 
@@ -131,6 +135,7 @@ def retry_run(run_id: int, db: Session = Depends(get_db), user: CurrentUser = Te
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
     db.commit()
+    wake_worker()
     return _run(run)
 
 
@@ -177,7 +182,8 @@ def _login() -> DeviceCodeLogin:
     global _device_login
     path = get_settings().graph_token_path
     if path is None:
-        raise HTTPException(409, "No hay ubicación para guardar la sesión (INV_GRAPH_TOKEN_FILE).")
+        raise HTTPException(409, "La sesión de Microsoft desde la web solo está disponible en la instalación "
+                                 "de Windows. En la nube, Intune usa el registro de aplicación (INV_GRAPH_*).")
     if _device_login is None or _device_login.store.path != path:
         _device_login = DeviceCodeLogin(TokenStore(path))
     return _device_login
@@ -807,6 +813,7 @@ def dashboard(db: Session = Depends(get_db), _: CurrentUser = Reader):
         "changes_weekly": changes_weekly,
         "departments": [{"name": n, "devices": c} for n, c in dept_rows],
         "worker_heartbeat": hb.value if hb else None,
+        "worker_interval_minutes": s.worker_interval_minutes,
         "open_review_cases": scalar(select(func.count()).select_from(ReviewCase).where(ReviewCase.status == "open")),
     }
 

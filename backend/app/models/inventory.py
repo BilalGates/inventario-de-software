@@ -3,7 +3,6 @@ from __future__ import annotations
 from datetime import datetime
 
 from sqlalchemy import (
-    JSON,
     Boolean,
     DateTime,
     ForeignKey,
@@ -15,7 +14,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.db import Base, utcnow
+from app.db import JSON, Base, utcnow
 
 RUN_STATUSES = ("queued", "running", "succeeded", "partial", "failed", "cancelled")
 

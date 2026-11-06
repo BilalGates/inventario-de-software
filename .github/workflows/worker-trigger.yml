@@ -1,0 +1,27 @@
+name: Disparador del worker
+
+# Instala (o actualiza) el trabajo pg_cron de Supabase que lanza el workflow «Worker» cada hora.
+# Ejecútelo a mano una vez, y otra vez tras rotar INV_WORKER_DISPATCH_TOKEN.
+# Ver infra/supabase/worker_trigger.sql.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      DATABASE_URL: ${{ secrets.INV_DATABASE_URL_SESSION }}
+      PGSSLMODE: require
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cliente de PostgreSQL
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client
+      - name: Instalar el trabajo de pg_cron
+        env:
+          TOKEN: ${{ secrets.INV_WORKER_DISPATCH_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: psql "$DATABASE_URL" -v token="$TOKEN" -v repo="$REPO" -f infra/supabase/worker_trigger.sql

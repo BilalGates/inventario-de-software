@@ -5,9 +5,12 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime, timezone
 
+from sqlalchemy import JSON as _JSON
 from sqlalchemy import MetaData, create_engine, event
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
+from sqlalchemy.pool import NullPool
 
 from app.core.config import get_settings
 
@@ -20,6 +23,10 @@ NAMING = {
 }
 
 
+# JSON portable: jsonb en PostgreSQL (admite igualdad, necesaria para SELECT DISTINCT), JSON en el resto.
+JSON = _JSON().with_variant(JSONB(), "postgresql")
+
+
 class Base(DeclarativeBase):
     metadata = MetaData(naming_convention=NAMING)
 
@@ -29,13 +36,28 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
-def make_engine(url: str) -> Engine:
+def normalize_url(url: str) -> str:
+    """Supabase y otros proveedores dan «postgres://» o «postgresql://»: se usa el controlador psycopg 3."""
+    for prefix in ("postgres://", "postgresql://"):
+        if url.startswith(prefix):
+            return "postgresql+psycopg://" + url[len(prefix):]
+    return url
+
+
+def make_engine(url: str, *, serverless: bool = False) -> Engine:
+    """serverless=True (funciones de Vercel): sin pool propio, el pooler de Supabase reparte las conexiones."""
+    url = normalize_url(url)
     kwargs: dict = {"future": True, "pool_pre_ping": True}
     if url.startswith("sqlite"):
         # timeout: espera al bloqueo en lugar de fallar enseguida ("database is locked").
         kwargs["connect_args"] = {"check_same_thread": False, "timeout": 30}
+    elif serverless:
+        kwargs["poolclass"] = NullPool
     else:
         kwargs.update(pool_recycle=3600, pool_size=5, max_overflow=5)
+    if url.startswith("postgresql+psycopg"):
+        # El pooler en modo transacción (puerto 6543) no admite sentencias preparadas.
+        kwargs["connect_args"] = {"prepare_threshold": None, "connect_timeout": 15}
     engine = create_engine(url, **kwargs)
     if url.startswith("sqlite"):
         @event.listens_for(engine, "connect")
@@ -54,7 +76,8 @@ _SessionLocal: sessionmaker[Session] | None = None
 def get_engine() -> Engine:
     global _engine, _SessionLocal
     if _engine is None:
-        _engine = make_engine(get_settings().database_url)
+        s = get_settings()
+        _engine = make_engine(s.database_url, serverless=s.serverless)
         _SessionLocal = sessionmaker(bind=_engine, expire_on_commit=False, future=True)
     return _engine
 

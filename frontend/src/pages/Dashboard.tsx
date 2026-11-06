@@ -201,6 +201,8 @@ export function Dashboard() {
   const d = data.devices;
   const sw = data.software;
   const workerAge = data.worker_heartbeat ? Date.now() - (parseUtc(data.worker_heartbeat.at)?.getTime() ?? 0) : null;
+  // Margen: dos pasadas perdidas más 10 minutos (el worker en la nube pasa cada hora).
+  const workerLimit = ((data.worker_interval_minutes ?? 1) * 2 + 10) * 60_000;
   const behind = d.stale + d.never_synced;
   const sources = Object.keys(data.monthly.coverage.sources).length;
   const critical = data.alerts.by_severity.critical ?? 0;
@@ -223,7 +225,7 @@ export function Dashboard() {
         </>}
         actions={<Button variant="primary" icon={<RefreshCw className="size-4" />} onClick={() => nav("/sincronizacion")}>Sincronizar</Button>} />
 
-      {(workerAge === null || workerAge > 10 * 60_000) && (
+      {(workerAge === null || workerAge > workerLimit) && (
         <div className="mb-6">
           <Notice tone="warn" title="El proceso de sincronización no está activo">
             Las sincronizaciones y la programación mensual necesitan el worker en ejecución

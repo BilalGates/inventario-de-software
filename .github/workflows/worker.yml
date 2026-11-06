@@ -1,0 +1,52 @@
+name: Worker
+
+# Worker de inventario contra Supabase: cola de sincronizaciones, programación mensual, borrador del
+# inventario mensual y alertas de fuentes sin datos. Cada ejecución hace una pasada completa
+# (python -m app.worker --once) y termina cuando la cola está vacía.
+#
+# Disparadores:
+# - pg_cron de Supabase lo lanza cada hora (infra/supabase/worker_trigger.sql), porque el «schedule»
+#   de GitHub es de mejor esfuerzo y puede saltarse horas. El schedule de abajo queda de respaldo.
+# - La API lo lanza al momento al encolar trabajo («Sincronizar ahora», subida de fichero, reintento).
+on:
+  schedule:
+    - cron: "23 * * * *"   # respaldo; fuera de la hora en punto, cuando GitHub retrasa los trabajos
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Una sola pasada a la vez; las llamadas que llegan mientras tanto esperan su turno.
+concurrency:
+  group: worker
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      # Settings > Secrets and variables > Actions (ver docs/despliegue-nube.md).
+      # Supabase: pooler de SESIÓN (puerto 5432).
+      INV_DATABASE_URL: ${{ secrets.INV_DATABASE_URL_SESSION }}
+      PGSSLMODE: require
+      INV_ENVIRONMENT: production
+      INV_AUTH_MODE: entra
+      INV_ENTRA_TENANT_ID: ${{ vars.INV_ENTRA_TENANT_ID }}
+      INV_ENTRA_API_CLIENT_ID: ${{ vars.INV_ENTRA_API_CLIENT_ID }}
+      INV_GRAPH_TENANT_ID: ${{ vars.INV_GRAPH_TENANT_ID }}
+      INV_GRAPH_CLIENT_ID: ${{ vars.INV_GRAPH_CLIENT_ID }}
+      INV_GRAPH_CLIENT_SECRET: ${{ secrets.INV_GRAPH_CLIENT_SECRET }}
+      INV_WORKER_INTERVAL_MINUTES: "60"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - run: pip install -r requirements.txt
+      - run: python -m app.worker --once
