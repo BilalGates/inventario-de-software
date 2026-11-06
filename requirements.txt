@@ -1,2 +1,13 @@
-# Dependencias de la función de Vercel (api/index.py): las mismas que el backend.
--r backend/requirements.txt
+# Dependencias de la función de Vercel (api/index.py), en Linux.
+# Vercel no admite «-r otro_fichero»: se listan aquí con las MISMAS versiones que backend/requirements.txt
+# (lo comprueba backend/tests/test_cloud.py). No incluye el servidor ni lo exclusivo de Windows o MySQL.
+fastapi==0.115.6
+sqlalchemy==2.0.36
+alembic==1.14.0
+pydantic==2.10.3
+pydantic-settings==2.6.1
+httpx==0.28.1
+pyjwt[crypto]==2.10.1
+psycopg[binary]==3.2.3
+openpyxl==3.1.5
+python-multipart==0.0.19
