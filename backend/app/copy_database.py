@@ -26,6 +26,9 @@ from app.db import Base, make_engine
 from app.services.audit import verify_chain
 
 CHUNK = 500
+# Lo que la API escribe sola en una base recién creada: datos de referencia al arrancar y una fila
+# en «users» por cada inicio de sesión. Se borra en el destino y se copia del origen.
+REPLACEABLE = ("users", "app_settings", "inventory_sources", "device_types")
 
 
 def _revision(engine: Engine) -> str | None:
@@ -51,8 +54,9 @@ def check(source: Engine, target: Engine) -> list[str]:
         problems.append(f"Revisiones distintas: origen {src_rev}, destino {dst_rev}. Actualice ambas a la misma.")
     if dst_rev is not None:
         busy = {k: v for k, v in _counts(target).items() if v}
-        # La API crea datos de referencia al arrancar: se aceptan solo si el destino no tiene nada más.
-        reference = {"device_types", "inventory_sources", "app_settings"}
+        # La API crea datos de referencia al arrancar y una fila en «users» por cada inicio de sesión:
+        # se aceptan (y se sustituyen por los del origen) solo si el destino no tiene nada más.
+        reference = set(REPLACEABLE)
         if set(busy) - reference:
             problems.append(f"El destino ya tiene datos: {', '.join(f'{k}={v}' for k, v in busy.items())}.")
     # PostgreSQL hace cumplir la longitud de VARCHAR; SQLite no.
@@ -86,8 +90,7 @@ def _batches(conn, table) -> Iterable[list[dict]]:
 def copy(source: Engine, target: Engine, log=print) -> dict[str, int]:
     copied: dict[str, int] = {}
     with source.connect() as src, target.begin() as dst:
-        # Datos de referencia que la API pudiera haber creado en el destino: se sustituyen por los del origen.
-        for name in ("app_settings", "inventory_sources", "device_types"):
+        for name in REPLACEABLE:
             dst.execute(Base.metadata.tables[name].delete())
         for table in Base.metadata.sorted_tables:
             self_fks = [fk.parent.name for fk in table.foreign_keys if fk.column.table is table]
