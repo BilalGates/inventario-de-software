@@ -1,13 +1,15 @@
 import { useQuery } from "@tanstack/react-query";
 import { Download, Tags } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { AuthBadge } from "@/components/badges";
 import { DataTable, type Column } from "@/components/DataTable";
-import { Badge, Button, Field, Modal, PageHeader, Segmented } from "@/components/ui";
+import { Badge, Button, ConfirmDialog, Field, Modal, PageHeader, Stat, StatStrip, Tabs } from "@/components/ui";
+import { Meter, Panel, RankedList, fmtPct, pct } from "@/components/viz";
+import { useDashboard, type DashboardData, type RankedProduct } from "@/lib/dashboard";
 import { api } from "@/lib/api";
 import { useCan } from "@/lib/auth";
-import { AUTH_LABEL, CATEGORY_LABEL, fmtDate } from "@/lib/format";
+import { AUTH_LABEL, CATEGORY_LABEL, fmtDate, fmtNumber } from "@/lib/format";
 import { useAction, useUrlState } from "@/lib/hooks";
 import { useDepartments } from "@/lib/queries";
 import type { Paged, Product } from "@/lib/types";
@@ -26,19 +28,108 @@ const VIEWS = {
   unused: { label: "Sin instalaciones vigentes", params: { installed: false } },
 } as const;
 
-const columns: Column<Product>[] = [
-  { id: "name", header: "Producto", sortKey: "name", cell: (p) => (
-    <Link to={`/software/${p.id}`} title={p.name}
-      className="block max-w-[22rem] truncate font-medium hover:underline hover:underline-offset-4 2xl:max-w-xl">{p.name}</Link>
-  ) },
-  { id: "publisher", header: "Editor", sortKey: "publisher", cell: (p) => <span className="block max-w-48 truncate" title={p.publisher ?? ""}>{p.publisher ?? "—"}</span> },
-  { id: "category", header: "Categoría", cell: (p) => <span className="text-muted">{CATEGORY_LABEL[p.category] ?? p.category}</span> },
-  { id: "status", header: "Autorización", sortKey: "status", cell: (p) => <AuthBadge status={p.authorization_status} /> },
-  { id: "devices", header: "Dispositivos", sortKey: "devices", align: "right", cell: (p) => p.devices },
-  { id: "versions", header: "Versiones", align: "right", cell: (p) => p.versions },
-  { id: "ens", header: "Clasificación ENS", hidden: true, cell: (p) => p.ens_classification ?? "—" },
-  { id: "first", header: "Primera detección", sortKey: "first_seen_at", cell: (p) => <span className="text-muted">{fmtDate(p.first_seen_at)}</span> },
-];
+function columns(fleet: number): Column<Product>[] {
+  return [
+    { id: "name", header: "Producto", sortKey: "name", cell: (p) => (
+      <Link to={`/software/${p.id}`} title={p.name}
+        className="block max-w-[22rem] truncate font-medium hover:underline hover:underline-offset-4 2xl:max-w-xl">{p.name}</Link>
+    ) },
+    { id: "publisher", header: "Editor", sortKey: "publisher", cell: (p) => <span className="block max-w-48 truncate text-muted" title={p.publisher ?? ""}>{p.publisher ?? "—"}</span> },
+    { id: "category", header: "Categoría", cell: (p) => <span className="text-muted">{CATEGORY_LABEL[p.category] ?? p.category}</span> },
+    { id: "versions", header: "Versiones", align: "right", cell: (p) => <span className="code">{p.versions}</span> },
+    { id: "devices", header: "Equipos", sortKey: "devices", cell: (p) => (
+      <div className="flex items-center gap-2.5">
+        <span className="disp w-7 text-right text-sm font-semibold">{p.devices}</span>
+        <span className="w-20"><Meter value={p.devices} max={fleet} /></span>
+      </div>
+    ) },
+    { id: "status", header: "Autorización", sortKey: "status", cell: (p) => <AuthBadge status={p.authorization_status} /> },
+    { id: "ens", header: "Clasificación ENS", hidden: true, cell: (p) => p.ens_classification ?? "—" },
+    { id: "first", header: "Primera detección", sortKey: "first_seen_at", hidden: true, cell: (p) => <span className="text-muted">{fmtDate(p.first_seen_at)}</span> },
+  ];
+}
+
+const STATUS_TABS = [
+  { id: "all", label: "Todo", status: null },
+  { id: "authorized", label: "Autorizado", status: "authorized" },
+  { id: "pending", label: "Por clasificar", status: "unclassified,pending_review" },
+  { id: "unauthorized", label: "No autorizado", status: "unauthorized" },
+  { id: "exception", label: "Excepciones", status: "exception" },
+] as const;
+
+/** Cola de clasificación rápida (panel oscuro): autoriza o rechaza lo más instalado de lo pendiente. */
+function ClassifyQueue({ data, canWrite }: { data: DashboardData; canWrite: boolean }) {
+  const queue = data.software.queue ?? [];
+  const [rejecting, setRejecting] = useState<RankedProduct | null>(null);
+  const decide = useAction(({ id, status }: { id: number; status: string }) => api.send<{ updated: number }>("POST", "/software/bulk-update",
+    { product_ids: [id], authorization_status: status, reason: "Clasificación rápida desde la cola" }), {
+    success: "Clasificación registrada", invalidate: [["software"], ["dashboard"], ["alerts"], ["alerts-count"]],
+    onSuccess: () => setRejecting(null),
+  });
+  return (
+    <section aria-label="Cola de clasificación"
+      className="flex min-w-0 flex-[1_1_24rem] flex-col gap-4 rounded-panel border border-[#1C1917] bg-[#1C1917] p-6 text-[#F3F2F0]">
+      <div className="flex items-center justify-between gap-2">
+        <p className="eyebrow text-[#A39E98]">Cola de clasificación</p>
+        <span className="font-mono text-2xs text-[#FF8A5C]">{data.software.pending} PENDIENTES</span>
+      </div>
+      <h2 className="disp text-lg font-semibold tracking-[-0.02em]">Decide qué se puede usar</h2>
+      {queue.length === 0 ? <p className="text-[13px] text-[#B5B0AA]">No hay aplicaciones pendientes de clasificar.</p> : (
+        <ul className="border-t border-[#33302D]">
+          {queue.map((q) => (
+            <li key={q.id} className="flex flex-wrap items-center gap-2.5 border-b border-[#33302D] py-3 last:border-b-0">
+              <div className="min-w-0 flex-[1_1_10rem]">
+                <Link to={`/software/${q.id}`} className="block truncate text-[13px] font-medium hover:underline hover:underline-offset-4" title={q.name}>{q.name}</Link>
+                <p className="font-mono text-2xs uppercase text-[#A39E98]">{[q.publisher, `${q.devices} ${q.devices === 1 ? "equipo" : "equipos"}`].filter(Boolean).join(" · ")}</p>
+              </div>
+              {canWrite && <>
+                <button type="button" onClick={() => setRejecting(q)} disabled={decide.isPending}
+                  className="min-h-8 rounded-md border border-[#3A3734] px-3 text-xs font-medium text-[#D6D3CF] transition-colors hover:border-[#A39E98] hover:text-white disabled:opacity-50">
+                  Rechazar</button>
+                <button type="button" onClick={() => decide.mutate({ id: q.id, status: "authorized" })} disabled={decide.isPending}
+                  className="min-h-8 rounded-md bg-[#F3F2F0] px-3 text-xs font-medium text-[#141312] transition-opacity hover:opacity-90 disabled:opacity-50">
+                  Autorizar</button>
+              </>}
+            </li>
+          ))}
+        </ul>
+      )}
+      {data.software.pending > queue.length && (
+        <Link to="/software?status=unclassified,pending_review" className="mt-auto text-xs text-[#D6D3CF] underline decoration-[#5E5954] underline-offset-4 hover:decoration-[#D6D3CF]">
+          Ver los {data.software.pending} pendientes</Link>
+      )}
+      <ConfirmDialog open={!!rejecting} onClose={() => setRejecting(null)} title="Marcar como no autorizado" danger
+        confirmLabel="No autorizar" busy={decide.isPending}
+        onConfirm={() => rejecting && decide.mutate({ id: rejecting.id, status: "unauthorized" })}>
+        Se abrirá una alerta por cada equipo que tenga instalado <strong>{rejecting?.name}</strong>.
+      </ConfirmDialog>
+    </section>
+  );
+}
+
+function SoftwareSummary({ data, canWrite }: { data: DashboardData; canWrite: boolean }) {
+  const sw = data.software;
+  const auth = sw.by_status.authorized ?? 0;
+  return (
+    <div className="mb-6 flex flex-col gap-6">
+      <StatStrip label="Catálogo por estado">
+        <Stat label="Autorizado" value={fmtNumber(auth)} hint={`${fmtPct(pct(auth, sw.products))} % de las aplicaciones`} />
+        <Stat label="Componentes" value={fmtNumber(sw.components ?? 0)} hint="paquetes de Microsoft / Windows" />
+        <Stat label="Por clasificar" value={fmtNumber(sw.pending)} tone={sw.pending ? "warn" : undefined}
+          hint={sw.pending ? "pendientes de autorizar o revisar" : "todo clasificado"} />
+        <Stat label="No autorizado" value={fmtNumber(sw.unauthorized_products)} tone={sw.unauthorized_products ? "danger" : undefined}
+          hint={sw.unauthorized_products ? "con alerta en cada equipo que lo tiene" : "ninguna aplicación bloqueada"} />
+      </StatStrip>
+      <div className="flex flex-wrap gap-6">
+        <Panel title="Más instalado" className="flex-[2_1_30rem]"
+          aside={<span className="text-[13px] text-muted">equipos con la aplicación, de {data.devices.total}</span>}>
+          <RankedList items={sw.top ?? []} total={data.devices.total} />
+        </Panel>
+        <ClassifyQueue data={data} canWrite={canWrite} />
+      </div>
+    </div>
+  );
+}
 
 export default function Software() {
   const can = useCan();
@@ -53,19 +144,34 @@ export default function Software() {
     page, page_size: PAGE_SIZE };
   const q = useQuery({ queryKey: ["software", params], queryFn: () => api.get<Paged<Product>>("/software", params),
     placeholderData: (prev) => prev });
+  const dash = useDashboard().data;
+  const fleet = Math.max(1, dash?.devices.total ?? 1);
+  const cols = useMemo(() => columns(fleet), [fleet]);
+  const tab = STATUS_TABS.find((t) => (t.status ?? "") === (values.status ?? ""))?.id ?? "all";
+  const by = dash?.software.by_status ?? {};
+  const tabCount: Record<string, number> | undefined = dash && {
+    all: dash.software.products, authorized: by.authorized ?? 0, pending: dash.software.pending,
+    unauthorized: by.unauthorized ?? 0, exception: by.exception ?? 0,
+  };
 
   return (
     <>
-      <PageHeader eyebrow="Inventario · Software" title="Catálogo de software" description="Catálogo global normalizado: cada producto existe una vez, con sus versiones e instalaciones."
-        actions={<Button icon={<Download className="size-4" />}
-          onClick={() => api.download("/software/export", { format: "xlsx", q: values.q, status: values.status,
-            category: values.category, relevant: params.relevant, department_id: values.department_id })}>Exportar</Button>} />
-      <div className="mb-3">
-        <Segmented label="Vistas" value={view} onChange={(k) => set({ view: k === "all" ? null : k })}
-          options={(Object.keys(VIEWS) as (keyof typeof VIEWS)[]).map((k) => ({ id: k, label: VIEWS[k].label }))} />
-      </div>
+      <PageHeader eyebrow="Inventario · Software" title="Catálogo de software"
+        description={dash ? `${fmtNumber(dash.software.products)} aplicaciones y ${fmtNumber(dash.software.installations)} instalaciones en ${dash.devices.total} equipos. Cada producto existe una vez, con sus versiones.`
+          : "Catálogo global normalizado: cada producto existe una vez, con sus versiones e instalaciones."}
+        actions={<>
+          <Button icon={<Download className="size-4" />}
+            onClick={() => api.download("/software/export", { format: "xlsx", q: values.q, status: values.status,
+              category: values.category, relevant: params.relevant, department_id: values.department_id })}>Excel por departamento</Button>
+          {can.write && !!dash?.software.pending && (
+            <Button variant="primary" onClick={() => set({ status: "unclassified,pending_review" })}>Clasificar pendientes</Button>
+          )}
+        </>} />
+      {dash && <SoftwareSummary data={dash} canWrite={can.write} />}
       <DataTable
-        columns={columns} rows={q.data?.items} total={q.data?.total} rowKey={(p) => p.id}
+        header={<Tabs bare label="Autorización" value={tab} onChange={(id) => set({ status: STATUS_TABS.find((t) => t.id === id)?.status ?? null })}
+          tabs={STATUS_TABS.map((t) => ({ id: t.id, label: t.label, count: tabCount?.[t.id] }))} />}
+        columns={cols} rows={q.data?.items} total={q.data?.total} rowKey={(p) => p.id}
         loading={q.isLoading} error={q.error} retry={q.refetch}
         page={page} pageSize={PAGE_SIZE} onPage={(p) => set({ page: p }, false)}
         sort={values.sort} onSort={(s) => set({ sort: s })}
@@ -73,10 +179,8 @@ export default function Software() {
         storageKey="software" selectable={can.write} selected={selected} onSelectedChange={setSelected}
         bulkActions={<Button size="sm" icon={<Tags className="size-4" />} onClick={() => setClassifying(true)}>Clasificar</Button>}
         toolbar={<>
-          <select aria-label="Autorización" className="field w-auto" value={values.status ?? ""} onChange={(e) => set({ status: e.target.value || null })}>
-            <option value="">Cualquier autorización</option>
-            <option value="unclassified,pending_review">Pendientes (sin clasificar o en revisión)</option>
-            {Object.entries(AUTH_LABEL).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+          <select aria-label="Vista" className="field w-auto" value={view} onChange={(e) => set({ view: e.target.value === "all" ? null : e.target.value })}>
+            {(Object.keys(VIEWS) as (keyof typeof VIEWS)[]).map((k) => <option key={k} value={k}>{VIEWS[k].label}</option>)}
           </select>
           <select aria-label="Tipo" className="field w-auto" value={relevant} onChange={(e) => set({ relevant: e.target.value === "true" ? null : e.target.value })}>
             <option value="true">Aplicaciones relevantes</option>

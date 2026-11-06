@@ -4,7 +4,9 @@ import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { SeverityBadge, SnapshotBadge } from "@/components/badges";
 import { DataTable, type Column } from "@/components/DataTable";
-import { Badge, Button, Card, EmptyState, Field, Modal, Notice, PageHeader, Spinner, Tabs } from "@/components/ui";
+import { Badge, Button, Card, EmptyState, Field, Modal, Notice, PageHeader, Spinner, Stat, StatStrip, Tabs } from "@/components/ui";
+import { MonthlyClose, WeeklyChanges } from "@/components/viz";
+import { useDashboard } from "@/lib/dashboard";
 import { api } from "@/lib/api";
 import { useCan } from "@/lib/auth";
 import { CHANGE_LABEL, FIELD_LABEL, SOURCE_LABEL, currentPeriod, fmtDateTime, fmtPeriod, fmtRelative } from "@/lib/format";
@@ -16,12 +18,37 @@ type Tab = "mensual" | "cambios" | "alertas" | "revision" | "registro";
 export default function Audit() {
   const [params, setParams] = useSearchParams();
   const tab = (params.get("tab") ?? "mensual") as Tab;
+  const dash = useDashboard().data;
+  const sev = dash?.alerts.by_severity ?? {};
+  const snap = dash?.monthly.snapshot;
+  const goAlerts = (severity?: string) => setParams(severity ? { tab: "alertas", severity } : { tab: "alertas" });
   return (
     <>
-      <PageHeader eyebrow="Control · Auditoría" title="Auditoría" description="Inventarios mensuales, cambios detectados, incidencias y evidencias trazables." />
+      <PageHeader eyebrow="Control · Auditoría" title="Auditoría"
+        description="Alertas abiertas, cambios registrados y cierre del inventario mensual, con evidencias trazables."
+        actions={snap && <Button variant="primary" icon={<FileSpreadsheet className="size-4" />}
+          onClick={() => api.download(`/snapshots/${snap.id}/report`)}>Informe mensual (Excel)</Button>} />
+      {dash && (
+        <div className="mb-8 flex flex-col gap-6">
+          <StatStrip label="Alertas por severidad">
+            <Stat label="Críticas" value={sev.critical ?? 0} tone={sev.critical ? "danger" : undefined}
+              hint={sev.critical ? "requieren actuación" : "ninguna abierta"} onClick={() => goAlerts("critical")} />
+            <Stat label="Avisos" value={sev.warning ?? 0} hint="atender esta semana" onClick={() => goAlerts("warning")} />
+            <Stat label="Informativas" value={sev.info ?? 0} hint="novedades sin urgencia" onClick={() => goAlerts("info")} />
+            <Stat label="Resueltas · 30 d" value={dash.alerts.resolved_30d ?? 0} hint="cerradas con justificación"
+              onClick={() => setParams({ tab: "alertas", status: "resolved" })} />
+          </StatStrip>
+          <div className="flex flex-wrap gap-6">
+            <MonthlyClose m={dash.monthly} reviewCases={dash.open_review_cases} className="flex-[1_1_22rem]" />
+            <WeeklyChanges weeks={dash.changes_weekly ?? []} className="flex-[2_1_30rem]" />
+          </div>
+        </div>
+      )}
       <Tabs value={tab} onChange={(t) => setParams({ tab: t })} tabs={[
         { id: "mensual", label: "Inventarios mensuales" }, { id: "cambios", label: "Cambios" },
-        { id: "alertas", label: "Alertas" }, { id: "revision", label: "Casos de revisión" }, { id: "registro", label: "Registro de auditoría" },
+        { id: "alertas", label: "Alertas", count: dash?.alerts.open },
+        { id: "revision", label: "Casos de revisión", count: dash?.open_review_cases || undefined },
+        { id: "registro", label: "Registro de auditoría" },
       ]} />
       {tab === "mensual" && <Monthly />}
       {tab === "cambios" && <Changes />}
@@ -204,7 +231,7 @@ function Alerts() {
   });
   const cols: Column<Alert>[] = [
     { id: "sev", header: "Severidad", cell: (a) => <SeverityBadge severity={a.severity} /> },
-    { id: "title", header: "Incidencia", cell: (a) => <div className="min-w-0"><p className="font-medium">{a.title}</p>
+    { id: "title", header: "Incidencia", cell: (a) => <div className="min-w-0 max-w-[36rem] whitespace-normal"><p className="font-medium">{a.title}</p>
       {a.detail && <p className="line-clamp-2 text-xs text-muted">{a.detail}</p>}</div> },
     { id: "link", header: "Relacionado", cell: (a) => <div className="flex flex-col text-xs">
       {a.device_id && <Link className="link" to={`/dispositivos/${a.device_id}`}>Dispositivo</Link>}

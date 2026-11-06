@@ -37,6 +37,8 @@ interface Props<T> {
   empty?: ReactNode;
   rowClassName?: (row: T) => string | undefined;
   bulkActions?: ReactNode;
+  /** Fila superior opcional (p. ej. pestañas de estado), sobre la barra de herramientas. */
+  header?: ReactNode;
 }
 
 function readHidden(key: string | undefined, cols: Column<unknown>[]): Set<string> {
@@ -112,6 +114,7 @@ export function DataTable<T>(p: Props<T>) {
 
   return (
     <div className="card overflow-hidden">
+      {p.header && <div className="border-b border-border px-4">{p.header}</div>}
       <div className="flex flex-wrap items-center gap-2 border-b border-border p-3">
         {p.onSearch && (
           <div className="relative min-w-52 flex-1 sm:max-w-xs">

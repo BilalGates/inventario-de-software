@@ -69,11 +69,32 @@ export const DEVICE_STATUS_LABEL: Record<string, string> = {
 };
 
 export const FRESHNESS_LABEL: Record<string, string> = {
-  current: "Sincronizado",
-  stale: "No observado recientemente",
+  current: "Al día",
+  stale: "Sin observar",
   never_synced: "Sin fuente automática",
   retired: "Dado de baja",
 };
+
+export const COMPLIANCE_LABEL: Record<string, string> = {
+  compliant: "Conforme", noncompliant: "No conforme", inGracePeriod: "En gracia", unknown: "Desconocido",
+  configManager: "ConfigMgr", error: "Error", conflict: "Conflicto",
+};
+
+/** Familia de sistema legible. Intune informa Windows 11 como «Windows 10.0.22000+» (mismo criterio que la API). */
+export function osFamily(name: string | null | undefined, version: string | null | undefined): string {
+  const n = (name ?? "").trim();
+  if (!n) return "Desconocido";
+  const low = n.toLowerCase();
+  if (low.includes("server")) return "Windows Server";
+  if (low.startsWith("windows")) {
+    if (n.includes("11")) return "Windows 11";
+    const build = Number((version ?? "").split(".")[2]);
+    if (!Number.isFinite(build)) return "Windows";
+    return build >= 22000 ? "Windows 11" : "Windows 10";
+  }
+  if (low.startsWith("mac") || low.startsWith("os x")) return "macOS";
+  return n;
+}
 
 export const RUN_STATUS_LABEL: Record<string, string> = {
   queued: "En cola",

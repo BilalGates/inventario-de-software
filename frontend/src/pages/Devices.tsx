@@ -5,10 +5,12 @@ import { Link, useNavigate } from "react-router-dom";
 import { ComplianceBadge, DeviceStatusBadge, FreshnessBadge, SourceBadge } from "@/components/badges";
 import { DataTable, type Column } from "@/components/DataTable";
 import { DeviceForm, type DeviceFormValues } from "@/components/DeviceForm";
-import { Button, Field, Modal, PageHeader } from "@/components/ui";
+import { Button, Field, Modal, PageHeader, Segmented, Stat, StatStrip } from "@/components/ui";
+import { Meter, fmtPct, pct } from "@/components/viz";
+import { useDashboard, type DashboardData } from "@/lib/dashboard";
 import { api } from "@/lib/api";
 import { useCan } from "@/lib/auth";
-import { FRESHNESS_LABEL, fmtBytes, fmtRelative } from "@/lib/format";
+import { SOURCE_LABEL, fmtBytes, fmtRelative, osFamily } from "@/lib/format";
 import { useAction, useUrlState } from "@/lib/hooks";
 import { useDepartments, useDeviceTypes } from "@/lib/queries";
 import type { DeviceDetail, DeviceRow, Paged } from "@/lib/types";
@@ -25,31 +27,89 @@ const columns: Column<DeviceRow>[] = [
       </div>
     );
   } },
-  { id: "serial", header: "Nº de serie", sortKey: "serial_number",
-    cell: (d) => <span className="font-mono text-xs">{d.serial_number ?? "—"}</span> },
-  { id: "type", header: "Tipo", hidden: true, cell: (d) => d.device_type ?? <span className="text-muted">Sin clasificar</span> },
-  { id: "department", header: "Departamento", sortKey: "department",
-    cell: (d) => d.department ?? <span className="text-muted">Sin asignar</span> },
   { id: "user", header: "Usuario", cell: (d) => <span className="block max-w-44 truncate" title={d.primary_user_upn ?? ""}>{d.primary_user ?? "—"}</span> },
-  { id: "model", header: "Modelo", sortKey: "model", hidden: true, cell: (d) => <span className="block max-w-48 truncate">{[d.manufacturer, d.model].filter(Boolean).join(" ") || "—"}</span> },
-  { id: "os", header: "Sistema", sortKey: "os_version", hidden: true, cell: (d) => <span className="whitespace-nowrap">{[d.os_name, d.os_version].filter(Boolean).join(" ") || "—"}</span> },
-  { id: "ram", header: "RAM", align: "right", hidden: true, cell: (d) => fmtBytes(d.ram_bytes, true) },
-  { id: "storage", header: "Disco", align: "right", hidden: true, cell: (d) => fmtBytes(d.storage_total_bytes) },
+  { id: "department", header: "Departamento", sortKey: "department",
+    cell: (d) => d.department ?? <span className="italic text-muted">Sin asignar</span> },
+  { id: "os", header: "Sistema", sortKey: "os_version", cell: (d) => {
+    const fam = osFamily(d.os_name, d.os_version);
+    return <span className={fam === "Windows 10" ? "text-signal" : "text-fg-2"} title={[d.os_name, d.os_version].filter(Boolean).join(" ")}>{fam}</span>;
+  } },
+  { id: "sources", header: "Fuentes",
+    cell: (d) => d.sources?.length ? <div className="flex gap-1">{d.sources.map((s) => <SourceBadge key={s} source={s} />)}</div>
+      : <SourceBadge source="manual" /> },
   { id: "compliance", header: "Cumplimiento", cell: (d) => <ComplianceBadge value={d.compliance_state} /> },
-  { id: "software", header: "Apps", align: "right", cell: (d) => d.software_count ?? 0 },
-  { id: "status", header: "Estado", sortKey: "status", hidden: true, cell: (d) => <DeviceStatusBadge status={d.status} /> },
   { id: "freshness", header: "Actualidad", sortKey: "last_seen_at", cell: (d) => (
     <div className="flex flex-col items-start gap-0.5">
       <FreshnessBadge value={d.freshness} />
       <span className="code text-2xs text-muted" title={d.last_seen_at ?? ""}>{fmtRelative(d.last_seen_at)}</span>
     </div>
   ) },
-  { id: "sources", header: "Fuentes", hidden: true,
-    cell: (d) => <div className="flex gap-1">{d.sources?.map((s) => <SourceBadge key={s} source={s} />)}</div> },
+  { id: "software", header: "Apps", align: "right", cell: (d) => <span className="disp text-sm font-semibold">{d.software_count ?? 0}</span> },
+  { id: "serial", header: "Nº de serie", sortKey: "serial_number", hidden: true,
+    cell: (d) => <span className="font-mono text-xs">{d.serial_number ?? "—"}</span> },
+  { id: "type", header: "Tipo", hidden: true, cell: (d) => d.device_type ?? <span className="text-muted">Sin clasificar</span> },
+  { id: "model", header: "Modelo", sortKey: "model", hidden: true, cell: (d) => <span className="block max-w-48 truncate">{[d.manufacturer, d.model].filter(Boolean).join(" ") || "—"}</span> },
+  { id: "ram", header: "RAM", align: "right", hidden: true, cell: (d) => fmtBytes(d.ram_bytes, true) },
+  { id: "storage", header: "Disco", align: "right", hidden: true, cell: (d) => fmtBytes(d.storage_total_bytes) },
+  { id: "status", header: "Estado", sortKey: "status", hidden: true, cell: (d) => <DeviceStatusBadge status={d.status} /> },
   { id: "seen", header: "Última observación", hidden: true,
     cell: (d) => <span className="whitespace-nowrap text-muted" title={d.last_seen_at ?? ""}>{fmtRelative(d.last_seen_at)}</span> },
   { id: "location", header: "Ubicación", hidden: true, cell: (d) => d.location ?? "—" },
 ];
+
+const OS_ORDER = ["Windows 11", "Windows 10", "Windows Server", "macOS"];
+const OS_COLOR: Record<string, string> = { "Windows 11": "bg-chart-1", "Windows 10": "bg-signal-fill", "Windows Server": "bg-chart-2", macOS: "bg-chart-3" };
+
+/** Franja de resumen del parque (datos del Panel, ya en caché). */
+function DeviceSummary({ data }: { data: DashboardData }) {
+  const d = data.devices;
+  const os = Object.entries(d.by_os ?? {}).sort((a, b) => {
+    const ia = OS_ORDER.indexOf(a[0]), ib = OS_ORDER.indexOf(b[0]);
+    return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || b[1] - a[1];
+  });
+  const osTotal = os.reduce((a, [, n]) => a + n, 0);
+  const win10 = d.by_os?.["Windows 10"] ?? 0;
+  const sources = Object.entries(d.by_source ?? {}).sort((a, b) => (a[0] === "manual" ? 1 : b[0] === "manual" ? -1 : b[1] - a[1]));
+  const comp = d.compliance;
+  const known = Object.entries(comp).filter(([k]) => k !== "None" && k !== "null").reduce((a, [, n]) => a + n, 0);
+  const ok = comp.compliant ?? 0;
+  const nc = comp.noncompliant ?? 0;
+  const grace = comp.inGracePeriod ?? 0;
+  return (
+    <StatStrip label="Resumen del parque" minCell="15rem" className="mb-6">
+      <div className="flex flex-col gap-3 bg-surface px-5 py-5">
+        <span className="eyebrow">Sistema operativo</span>
+        <div role="img" aria-label={os.map(([n, c]) => `${n}: ${c}`).join(", ")} className="flex h-2 gap-0.5 overflow-hidden rounded-sm">
+          {os.map(([n, c]) => <span key={n} className={OS_COLOR[n] ?? "bg-chart-4"} style={{ width: `${pct(c, osTotal)}%` }} />)}
+        </div>
+        <ul className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+          {os.map(([n, c]) => (
+            <li key={n} className="flex gap-2">
+              <span className={n === "Windows 10" ? "flex-1 text-signal" : "flex-1 text-muted"}>{n}</span>
+              <span className={n === "Windows 10" ? "disp font-semibold text-signal" : "disp font-semibold"}>{c}</span>
+            </li>
+          ))}
+        </ul>
+        {win10 > 0 && <p className="text-xs text-muted">Windows 10 sin soporte desde oct 2025</p>}
+      </div>
+      <div className="flex flex-col gap-3 bg-surface px-5 py-5">
+        <span className="eyebrow">Cobertura por fuente</span>
+        <ul className="flex flex-col gap-2.5 text-[13px]">
+          {sources.map(([src, n]) => (
+            <li key={src} className="flex flex-col gap-1.5">
+              <div className="flex"><span className="flex-1">{SOURCE_LABEL[src] ?? src}</span><span className="code">{n}</span></div>
+              <Meter value={n} max={d.total} className={src === "manual" ? "bg-chart-3" : "bg-fg"} />
+            </li>
+          ))}
+        </ul>
+      </div>
+      <Stat label="Cumplimiento Intune" value={known ? <>{fmtPct(pct(ok, known))}<span className="text-[20px] text-muted"> %</span></> : "—"}
+        hint={<>{ok} conformes · <span className={nc ? "font-medium text-signal" : ""}>{nc} no conformes</span>{grace ? ` · ${grace} en gracia` : ""}</>} />
+      <Stat label="Sin observar" value={d.stale} tone={d.stale ? "warn" : undefined}
+        hint={d.stale ? "sin datos recientes de ninguna fuente" : "todos los equipos con datos recientes"} />
+    </StatStrip>
+  );
+}
 
 export default function Devices() {
   const can = useCan();
@@ -60,6 +120,7 @@ export default function Devices() {
   const [moving, setMoving] = useState(false);
   const depts = useDepartments().data?.items ?? [];
   const types = useDeviceTypes().data ?? [];
+  const dash = useDashboard().data;
   const filters = { ...values, page, page_size: PAGE_SIZE };
   const q = useQuery({
     queryKey: ["devices", filters],
@@ -73,12 +134,15 @@ export default function Devices() {
 
   return (
     <>
-      <PageHeader eyebrow="Inventario · Dispositivos" title="Dispositivos" description="Activos tecnológicos con identidad única, de Intune, Panda o alta manual."
+      <PageHeader eyebrow="Inventario · Dispositivos" title="Dispositivos"
+        description={dash ? `${dash.devices.total} equipos registrados. Intune y Panda los observan en cada sincronización; el resto se da de alta a mano.`
+          : "Activos tecnológicos con identidad única, de Intune, Panda o alta manual."}
         actions={<>
           <Button icon={<Download className="size-4" />}
             onClick={() => api.download("/devices/export", { ...values, format: "xlsx", q: values.q })}>Exportar</Button>
           {can.write && <Button variant="primary" icon={<Plus className="size-4" />} onClick={() => setCreating(true)}>Nuevo dispositivo</Button>}
         </>} />
+      {dash && <DeviceSummary data={dash} />}
       <DataTable
         columns={columns}
         rows={q.data?.items}
@@ -113,11 +177,14 @@ export default function Devices() {
             <option value="">Todos los tipos</option>
             {types.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
-          <select aria-label="Actualidad" className="field w-auto" value={values.freshness ?? ""}
-            onChange={(e) => set({ freshness: e.target.value || null })}>
-            <option value="">Vigentes</option>
-            {Object.entries(FRESHNESS_LABEL).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
-          </select>
+          <Segmented label="Actualidad" value={values.freshness ?? "all"} onChange={(v) => set({ freshness: v === "all" ? null : v })}
+            options={[
+              { id: "all", label: "Vigentes", count: dash?.devices.total },
+              { id: "current", label: "Al día", count: dash?.devices.current },
+              { id: "stale", label: "Sin observar", count: dash?.devices.stale },
+              { id: "never_synced", label: "Sin fuente", count: dash?.devices.never_synced },
+              { id: "retired", label: "Bajas", count: dash?.devices.by_status.retired ?? 0 },
+            ]} />
         </>}
       />
       {creating && <DeviceForm open title="Nuevo dispositivo" onClose={() => setCreating(false)} busy={create.isPending}

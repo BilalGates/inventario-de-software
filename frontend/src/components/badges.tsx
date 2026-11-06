@@ -1,16 +1,34 @@
-import { AUTH_LABEL, DEVICE_STATUS_LABEL, FRESHNESS_LABEL, RUN_STATUS_LABEL, SNAPSHOT_STATUS_LABEL, SOURCE_LABEL } from "@/lib/format";
-import { Badge, type Tone } from "./ui";
+import { AUTH_LABEL, COMPLIANCE_LABEL, DEVICE_STATUS_LABEL, FRESHNESS_LABEL, RUN_STATUS_LABEL, SNAPSHOT_STATUS_LABEL,
+  SOURCE_LABEL } from "@/lib/format";
+import { Badge, cx, type Tone } from "./ui";
 
-const AUTH_TONE: Record<string, Tone> = {
-  authorized: "ok", unauthorized: "danger", pending_review: "warn", exception: "info", unclassified: "neutral",
+/** Estado como punto cuadrado + texto (tablas): tinta para lo normal, señal para lo que requiere atención. */
+type Mark = "ink" | "signal" | "muted" | "hollow";
+const MARK: Record<Mark, [string, string]> = {
+  ink: ["bg-fg", "text-fg-2"],
+  signal: ["bg-signal-fill", "font-medium text-signal"],
+  muted: ["bg-chart-3", "text-muted"],
+  hollow: ["border border-fg-2 bg-transparent", "text-fg-2"],
+};
+export function StatusText({ mark, children, title }: { mark: Mark; children: string; title?: string }) {
+  const [dot, text] = MARK[mark];
+  return (
+    <span title={title} className={cx("inline-flex items-center gap-2 whitespace-nowrap text-[13px]", text)}>
+      <span className={cx("size-[7px] shrink-0 rounded-[2px]", dot)} aria-hidden />{children}
+    </span>
+  );
+}
+
+const AUTH_MARK: Record<string, Mark> = {
+  authorized: "ink", unauthorized: "signal", pending_review: "hollow", exception: "muted", unclassified: "hollow",
 };
 export const AuthBadge = ({ status }: { status: string }) => (
-  <Badge tone={AUTH_TONE[status] ?? "neutral"} dot>{AUTH_LABEL[status] ?? status}</Badge>
+  <StatusText mark={AUTH_MARK[status] ?? "muted"}>{AUTH_LABEL[status] ?? status}</StatusText>
 );
 
-const FRESH_TONE: Record<string, Tone> = { current: "ok", stale: "warn", never_synced: "neutral", retired: "neutral" };
+const FRESH_MARK: Record<string, Mark> = { current: "ink", stale: "signal", never_synced: "muted", retired: "muted" };
 export const FreshnessBadge = ({ value }: { value: string }) => (
-  <Badge tone={FRESH_TONE[value]} dot>{FRESHNESS_LABEL[value] ?? value}</Badge>
+  <StatusText mark={FRESH_MARK[value] ?? "muted"}>{FRESHNESS_LABEL[value] ?? value}</StatusText>
 );
 
 const STATUS_TONE: Record<string, Tone> = { active: "accent", in_stock: "neutral", repair: "warn", retired: "neutral", lost: "danger" };
@@ -23,23 +41,31 @@ export const RunStatusBadge = ({ status }: { status: string }) => (
   <Badge tone={RUN_TONE[status] ?? "neutral"} dot>{RUN_STATUS_LABEL[status] ?? status}</Badge>
 );
 
-const SEV_TONE: Record<string, Tone> = { critical: "danger", warning: "warn", info: "info" };
-const SEV_LABEL: Record<string, string> = { critical: "Crítica", warning: "Aviso", info: "Info" };
-export const SeverityBadge = ({ severity }: { severity: string }) => (
-  <Badge tone={SEV_TONE[severity] ?? "neutral"}>{SEV_LABEL[severity] ?? severity}</Badge>
-);
+/** Severidad como código monoespaciado: CRIT en señal, AVISO en tinta, INFO apagado. */
+const SEV: Record<string, [string, string, string]> = {
+  critical: ["CRIT", "Crítica", "text-signal"], warning: ["AVISO", "Aviso", "text-fg"], info: ["INFO", "Informativa", "text-muted"],
+};
+export function SeverityBadge({ severity }: { severity: string }) {
+  const [code, label, tone] = SEV[severity] ?? [severity.toUpperCase(), severity, "text-muted"];
+  return <span title={label} className={cx("code text-2xs font-medium tracking-[0.04em]", tone)}>
+    <span aria-hidden>{code}</span><span className="sr-only">{label}</span>
+  </span>;
+}
 
 const SNAP_TONE: Record<string, Tone> = { draft: "warn", approved: "ok", rejected: "danger", legacy: "neutral" };
 export const SnapshotBadge = ({ status }: { status: string }) => (
   <Badge tone={SNAP_TONE[status] ?? "neutral"}>{SNAPSHOT_STATUS_LABEL[status] ?? status}</Badge>
 );
 
-export const SourceBadge = ({ source }: { source: string }) => <Badge>{SOURCE_LABEL[source] ?? source}</Badge>;
+/** Fuente de datos como etiqueta monoespaciada pequeña (INTUNE, PANDA…). */
+export const SourceBadge = ({ source }: { source: string }) => (
+  <span className="inline-block rounded-[3px] border border-border-strong px-1.5 py-px font-mono text-[10px] uppercase tracking-[0.04em] text-fg-2">
+    {SOURCE_LABEL[source] ?? source}
+  </span>
+);
 
 export function ComplianceBadge({ value }: { value: string | null }) {
   if (!value) return <span className="text-muted">—</span>;
-  const tone: Tone = value === "compliant" ? "ok" : value === "noncompliant" ? "danger" : "neutral";
-  const label: Record<string, string> = { compliant: "Conforme", noncompliant: "No conforme", inGracePeriod: "En gracia",
-    unknown: "Desconocido", configManager: "ConfigMgr", error: "Error", conflict: "Conflicto" };
-  return <Badge tone={tone}>{label[value] ?? value}</Badge>;
+  const mark: Mark = value === "compliant" ? "ink" : value === "noncompliant" ? "signal" : "muted";
+  return <StatusText mark={mark}>{COMPLIANCE_LABEL[value] ?? value}</StatusText>;
 }

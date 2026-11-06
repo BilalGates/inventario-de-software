@@ -104,12 +104,15 @@ export function Card({ title, actions, children, className, padded = true }: { t
 }
 
 /** Franja de indicadores: celdas separadas por líneas finas dentro de un único panel. */
-export function StatStrip({ children, className, label = "Indicadores" }: { children: ReactNode; className?: string;
-  label?: string }) {
+export function StatStrip({ children, className, label = "Indicadores", minCell = "11rem" }: { children: ReactNode;
+  className?: string; label?: string; minCell?: string }) {
   return (
-    <section aria-label={label} className={cx("card grid overflow-hidden [&>*]:shadow-[1px_1px_0_0_rgb(var(--border))]",
-      "grid-cols-[repeat(auto-fit,minmax(min(100%,11rem),1fr))]", className)}>
-      {children}
+    <section aria-label={label} className={cx("card overflow-hidden", className)}>
+      {/* Cada celda pinta su borde derecho e inferior; el margen negativo esconde los del límite exterior. */}
+      <div className="-mb-px -mr-px grid [&>*]:border-b [&>*]:border-r [&>*]:border-border"
+        style={{ gridTemplateColumns: `repeat(auto-fit, minmax(min(100%, ${minCell}), 1fr))` }}>
+        {children}
+      </div>
     </section>
   );
 }
@@ -184,10 +187,10 @@ export function Notice({ tone = "info", title, children }: { tone?: Tone; title?
 }
 
 // ---------------------------------------------------------------- Pestañas
-export function Tabs<T extends string>({ tabs, value, onChange }: { tabs: { id: T; label: ReactNode }[]; value: T;
-  onChange: (v: T) => void }) {
+export function Tabs<T extends string>({ tabs, value, onChange, bare, label }: { tabs: { id: T; label: ReactNode; count?: ReactNode }[];
+  value: T; onChange: (v: T) => void; /** Sin margen ni borde: para usar dentro de otro contenedor. */ bare?: boolean; label?: string }) {
   return (
-    <div role="tablist" className="mb-5 flex gap-6 overflow-x-auto border-b border-border">
+    <div role="tablist" aria-label={label} className={cx("flex gap-6 overflow-x-auto", !bare && "mb-5 border-b border-border")}>
       {tabs.map((t) => (
         <button
           key={t.id}
@@ -200,6 +203,7 @@ export function Tabs<T extends string>({ tabs, value, onChange }: { tabs: { id: 
           )}
         >
           {t.label}
+          {t.count != null && <span className="code ml-2 text-2xs text-muted">{t.count}</span>}
         </button>
       ))}
     </div>

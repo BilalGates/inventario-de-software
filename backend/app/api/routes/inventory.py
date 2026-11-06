@@ -13,7 +13,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from app.api.common import Page, _csv_safe, export_response, not_found, paginate
-from app.api.routes.devices import DEVICE_EXPORT_COLUMNS, device_export_rows
+from app.api.routes.devices import DEVICE_EXPORT_COLUMNS, device_export_rows, freshness
 from app.api.software_report import NO_DEPARTMENT, Install, _header, _sheet_title, build_workbook
 from app.connectors.base import ConnectorError
 from app.connectors.files import decode
@@ -662,6 +662,27 @@ def export_audit(format: str = Query("xlsx", pattern="^(csv|xlsx)$"), since: dat
 
 
 # --------------------------------------------------------------------------- dashboard y salud
+def _os_family(name: str | None, version: str | None) -> str:
+    """Familia de sistema legible. Intune informa Windows 11 como «Windows 10.0.22000+»."""
+    n = (name or "").strip()
+    if not n:
+        return "Desconocido"
+    low = n.lower()
+    if "server" in low:
+        return "Windows Server"
+    if low.startswith("windows"):
+        if "11" in n:
+            return "Windows 11"
+        try:
+            build = int((version or "").split(".")[2])
+        except (IndexError, ValueError):
+            return "Windows"
+        return "Windows 11" if build >= 22000 else "Windows 10"
+    if low.startswith(("mac", "os x")):
+        return "macOS"
+    return n
+
+
 @router.get("/dashboard")
 def dashboard(db: Session = Depends(get_db), _: CurrentUser = Reader):
     s = get_settings()
@@ -714,6 +735,54 @@ def dashboard(db: Session = Depends(get_db), _: CurrentUser = Reader):
         changes_daily.append({"date": key, "installed": counts.get("software_installed", 0),
                               "removed": counts.get("software_removed", 0),
                               "updated": counts.get("software_version_changed", 0)})
+    # Cambios por semana (8 semanas, la última termina hoy): instalaciones y actualizaciones.
+    since_56 = now - timedelta(days=56)
+    weekly_rows = db.execute(select(day, InventoryChange.change_type, func.count())
+                             .where(InventoryChange.detected_at >= since_56,
+                                    InventoryChange.change_type.in_(daily_types))
+                             .group_by(day, InventoryChange.change_type)).all()
+    changes_weekly = [{"week_start": (now - timedelta(days=7 * (8 - i))).strftime("%Y-%m-%d"),
+                       "installed": 0, "removed": 0, "updated": 0} for i in range(8)]
+    key_of = {"software_installed": "installed", "software_removed": "removed", "software_version_changed": "updated"}
+    today = now.date()
+    for d, kind, n in weekly_rows:
+        age = (today - datetime.strptime(str(d)[:10], "%Y-%m-%d").date()).days
+        if 0 <= age < 56:
+            changes_weekly[7 - age // 7][key_of[kind]] += n
+
+    # El parque es pequeño (decenas de equipos): se devuelve completo para dibujarlo equipo a equipo.
+    fleet_rows = db.execute(select(Device, Department.name).outerjoin(Department, Department.id == Device.department_id)
+                            .where(active).order_by(Device.hostname).limit(300)).all()
+    fleet = [{"id": dv.id, "name": dv.display_name, "freshness": freshness(dv, s.stale_device_days, now),
+              "compliance": dv.compliance_state, "department": dept} for dv, dept in fleet_rows]
+    by_os: dict[str, int] = {}
+    for dv, _ in fleet_rows:
+        by_os[_os_family(dv.os_name, dv.os_version)] = by_os.get(_os_family(dv.os_name, dv.os_version), 0) + 1
+    by_source = dict(db.execute(select(DeviceExternalId.source, func.count(func.distinct(DeviceExternalId.device_id)))
+                                .join(Device, Device.id == DeviceExternalId.device_id).where(active)
+                                .group_by(DeviceExternalId.source)).all())
+    with_source = scalar(select(func.count(func.distinct(DeviceExternalId.device_id)))
+                         .join(Device, Device.id == DeviceExternalId.device_id).where(active))
+    by_source["manual"] = total - with_source
+
+    # Software: lo más instalado y la cola de clasificación (aplicaciones relevantes).
+    dev_count = func.count(func.distinct(SoftwareInstallation.device_id))
+    relevant = (SoftwareProduct.merged_into_id.is_(None), SoftwareProduct.is_relevant.is_(True))
+
+    def ranked(*where, limit: int):
+        return db.execute(select(SoftwareProduct, dev_count)
+                          .join(SoftwareInstallation, SoftwareInstallation.product_id == SoftwareProduct.id)
+                          .join(Device, Device.id == SoftwareInstallation.device_id)
+                          .where(*relevant, *where, SoftwareInstallation.present.is_(True), active)
+                          .group_by(SoftwareProduct.id).order_by(dev_count.desc(), SoftwareProduct.name).limit(limit)).all()
+
+    components = scalar(select(func.count()).select_from(SoftwareProduct)
+                        .where(SoftwareProduct.merged_into_id.is_(None), SoftwareProduct.is_relevant.is_(False)))
+    top_installed = [{"id": p.id, "name": p.name, "publisher": p.publisher, "devices": n} for p, n in ranked(limit=8)]
+    queue = [{"id": p.id, "name": p.name, "publisher": p.publisher, "devices": n}
+             for p, n in ranked(SoftwareProduct.authorization_status.in_(("unclassified", "pending_review")), limit=5)]
+    resolved_30 = scalar(select(func.count()).select_from(Alert).where(Alert.status == "resolved",
+                                                                        Alert.resolved_at >= since_30))
     dept_rows = db.execute(select(Department.name, func.count(Device.id)).join(
         Device, (Device.department_id == Department.id) & active).group_by(Department.name)
         .order_by(func.count(Device.id).desc())).all()
@@ -721,11 +790,13 @@ def dashboard(db: Session = Depends(get_db), _: CurrentUser = Reader):
     return {
         "generated_at": now,
         "devices": {"total": total, "current": current, "stale": total - current - never, "never_synced": never,
-                    "unassigned": unassigned, "by_status": by_status, "compliance": {str(k): v for k, v in compliance.items()}},
+                    "unassigned": unassigned, "by_status": by_status, "compliance": {str(k): v for k, v in compliance.items()},
+                    "by_os": by_os, "by_source": by_source, "fleet": fleet},
         "software": {"products": sum(products.values()), "by_status": products, "installations": installs,
                      "pending": products.get("unclassified", 0) + products.get("pending_review", 0),
-                     "unauthorized_products": products.get("unauthorized", 0)},
-        "alerts": {"open": sum(alerts.values()), "by_severity": alerts,
+                     "unauthorized_products": products.get("unauthorized", 0),
+                     "components": components, "top": top_installed, "queue": queue},
+        "alerts": {"open": sum(alerts.values()), "by_severity": alerts, "resolved_30d": resolved_30,
                    "top": [_alert(a) for a in top_alerts]},
         "monthly": {"period": period, "snapshot": _snap(snap) if snap else None,
                     "coverage": snapshots.coverage(db, period)},
@@ -733,6 +804,7 @@ def dashboard(db: Session = Depends(get_db), _: CurrentUser = Reader):
         "changes": [_change(c) for c in recent_changes],
         "changes_30d": changes_30,
         "changes_daily": changes_daily,
+        "changes_weekly": changes_weekly,
         "departments": [{"name": n, "devices": c} for n, c in dept_rows],
         "worker_heartbeat": hb.value if hb else None,
         "open_review_cases": scalar(select(func.count()).select_from(ReviewCase).where(ReviewCase.status == "open")),

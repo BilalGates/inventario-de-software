@@ -255,6 +255,42 @@ def test_dashboard_daily_software_activity(client, db):
     assert daily[-1] == {"date": now.strftime("%Y-%m-%d"), "installed": 2, "removed": 0, "updated": 0}
     assert daily[-3]["removed"] == 1 and daily[-3]["updated"] == 1
     assert sum(d["installed"] for d in daily) == 2  # lo de hace 40 días queda fuera
+    weekly = client.get("/api/dashboard").json()["changes_weekly"]
+    assert len(weekly) == 8
+    assert weekly[-1]["installed"] == 2 and weekly[-1]["removed"] == 1
+    assert weekly[-6]["installed"] == 1  # hace 40 días: sexta semana empezando por la actual
+
+
+def test_dashboard_fleet_os_sources_and_software_rankings(client, db):
+    from app.models import DeviceExternalId, SoftwareInstallation, SoftwareProduct, SoftwareVersion
+
+    w11 = Device(hostname="PC-11", os_name="Windows", os_version="10.0.26100.2033", compliance_state="compliant")
+    w10 = Device(hostname="PC-10", os_name="Windows", os_version="10.0.19045.1", compliance_state="noncompliant")
+    srv = Device(hostname="SRV-01", os_name="Windows Server 2022")
+    db.add_all([w11, w10, srv])
+    db.flush()
+    db.add(DeviceExternalId(device_id=w11.id, source="intune", id_type="intune_device_id", value="x1"))
+    chrome = SoftwareProduct(name="Chrome", name_key="chrome", authorization_status="authorized")
+    zoom = SoftwareProduct(name="Zoom", name_key="zoom", authorization_status="unclassified")
+    db.add_all([chrome, zoom])
+    db.flush()
+    vc, vz = SoftwareVersion(product_id=chrome.id, version="130"), SoftwareVersion(product_id=zoom.id, version="6.2")
+    db.add_all([vc, vz])
+    db.flush()
+    db.add_all([SoftwareInstallation(device_id=d.id, product_id=chrome.id, version_id=vc.id, source="intune")
+                for d in (w11, w10, srv)] +
+               [SoftwareInstallation(device_id=w10.id, product_id=zoom.id, version_id=vz.id, source="intune")])
+    db.commit()
+    dash = client.get("/api/dashboard").json()
+    dev = dash["devices"]
+    assert dev["by_os"] == {"Windows 11": 1, "Windows 10": 1, "Windows Server": 1}
+    assert dev["by_source"] == {"intune": 1, "manual": 2}
+    assert [f["name"] for f in dev["fleet"]] == ["PC-10", "PC-11", "SRV-01"]
+    assert {f["name"]: f["compliance"] for f in dev["fleet"]}["PC-10"] == "noncompliant"
+    assert [(p["name"], p["devices"]) for p in dash["software"]["top"]] == [("Chrome", 3), ("Zoom", 1)]
+    assert [p["name"] for p in dash["software"]["queue"]] == ["Zoom"]
+    assert dash["software"]["components"] == 0
+    assert dash["alerts"]["resolved_30d"] == 0
 
 
 def test_audit_endpoints(client, db):
