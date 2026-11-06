@@ -115,3 +115,24 @@ def test_vercel_requirements_match_backend_versions():
     needed = {"fastapi", "sqlalchemy", "pydantic", "pydantic-settings", "httpx", "pyjwt", "psycopg", "openpyxl",
               "python-multipart"}
     assert needed <= set(vercel)
+
+
+@pytest.mark.parametrize("mode", ["dev", "local"])
+def test_vercel_refuses_to_start_without_login(monkeypatch, mode):
+    """En Vercel la URL es pública: sin Entra cualquiera entraría como administrador."""
+    from pydantic import ValidationError
+
+    from app.core.config import Settings
+
+    monkeypatch.setenv("VERCEL", "1")
+    with pytest.raises(ValidationError, match="INV_AUTH_MODE=entra"):
+        Settings(auth_mode=mode, environment="development")
+
+
+def test_vercel_with_entra_starts(monkeypatch):
+    from app.core.config import Settings
+
+    monkeypatch.setenv("VERCEL", "1")
+    s = Settings(auth_mode="entra", environment="production", entra_tenant_id="t", entra_api_client_id="a",
+                 database_url="postgresql://u:p@h:6543/postgres")
+    assert s.serverless is True

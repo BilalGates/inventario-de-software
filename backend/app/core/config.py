@@ -76,6 +76,10 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _check_production(self) -> "Settings":
+        if os.environ.get("VERCEL") and self.auth_mode != "entra":
+            # Publicado en Internet: nunca sin inicio de sesión (los modos dev/local entran como administrador).
+            raise ValueError("En Vercel la aplicación es pública: configure INV_AUTH_MODE=entra e "
+                             "INV_ENVIRONMENT=production (ver docs/despliegue-nube.md).")
         if self.auth_mode == "local" and self.bind_host not in ("127.0.0.1", "localhost", "::1"):
             raise ValueError("INV_AUTH_MODE=local solo puede escuchar en 127.0.0.1: sin login, "
                              "exponerlo en la red daría acceso a cualquiera. Use 'entra' para acceso en red.")
