@@ -92,3 +92,26 @@ def test_copy_database_refuses_target_without_schema(tmp_path):
     src = _sqlite(tmp_path / "origen.db")
     empty = make_engine(f"sqlite:///{tmp_path / 'vacia.db'}")
     assert any("alembic upgrade head" in p for p in check(src, empty))
+
+
+def test_vercel_requirements_match_backend_versions():
+    """El requirements.txt de la raíz (Vercel) debe usar las mismas versiones que el backend."""
+    from pathlib import Path
+
+    def pins(path: Path) -> dict[str, str]:
+        out = {}
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.split("#", 1)[0].split(";", 1)[0].strip()
+            if "==" in line:
+                name, version = line.split("==", 1)
+                out[name.split("[", 1)[0].lower()] = version.strip()
+        return out
+
+    root = Path(__file__).resolve().parents[2]
+    vercel, backend = pins(root / "requirements.txt"), pins(root / "backend" / "requirements.txt")
+    lines = [ln.strip() for ln in (root / "requirements.txt").read_text(encoding="utf-8").splitlines()]
+    assert not [ln for ln in lines if ln.startswith("-")], "Vercel no admite opciones como -r en requirements.txt"
+    assert vercel and all(backend.get(k) == v for k, v in vercel.items()), (vercel, backend)
+    needed = {"fastapi", "sqlalchemy", "pydantic", "pydantic-settings", "httpx", "pyjwt", "psycopg", "openpyxl",
+              "python-multipart"}
+    assert needed <= set(vercel)
