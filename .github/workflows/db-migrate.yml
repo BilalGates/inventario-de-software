@@ -1,0 +1,37 @@
+name: Migraciones de base de datos
+
+# Aplica las migraciones de Alembic a Supabase. Se lanza a mano y en cada push a main que cambie
+# el esquema, antes de que el nuevo código lo necesite.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ["backend/alembic/**", "backend/app/models/**"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: db-migrate
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      INV_DATABASE_URL: ${{ secrets.INV_DATABASE_URL_SESSION }}
+      PGSSLMODE: require
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - run: pip install -r requirements.txt
+      - run: alembic upgrade head
+      - run: alembic current

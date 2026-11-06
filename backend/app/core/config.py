@@ -15,8 +15,11 @@ class Settings(BaseSettings):
 
     environment: Literal["development", "test", "production"] = "development"
 
-    # Base de datos. En producción: mysql+pymysql://usuario:clave@host:3306/inventario_asserta?charset=utf8mb4
+    # Base de datos. En la nube: PostgreSQL de Supabase (postgresql://usuario:clave@host:6543/postgres).
+    # También admite mysql+pymysql://… y SQLite para desarrollo.
     database_url: str = "sqlite:///./inventario_dev.db"
+    # Funciones sin estado (Vercel): sin pool de conexiones propio. Se activa sola si existe VERCEL.
+    serverless: bool = Field(default_factory=lambda: bool(os.environ.get("VERCEL")))
 
     # Autenticación
     # - "entra": valida tokens de Microsoft Entra ID (obligatorio en producción).
@@ -57,6 +60,14 @@ class Settings(BaseSettings):
 
     # Worker
     worker_poll_seconds: int = 15
+    # Cada cuánto pasa el worker, en minutos (para avisar si deja de latir). Local continuo: 1;
+    # en la nube (GitHub Actions cada hora): 60.
+    worker_interval_minutes: int = 1
+    # Nube: lanzar el workflow del worker al encolar trabajo (token de GitHub con «Actions: write»).
+    worker_dispatch_token: str = Field(default="", repr=False)
+    worker_dispatch_repo: str = ""  # p. ej. BilalGates/inventario-de-software
+    worker_dispatch_workflow: str = "worker.yml"
+    worker_dispatch_ref: str = "main"
     log_file: str = ""
     stale_device_days: int = 30
 
@@ -74,7 +85,7 @@ class Settings(BaseSettings):
             if self.auth_mode == "entra" and not (self.entra_tenant_id and self.entra_api_client_id):
                 raise ValueError("Faltan INV_ENTRA_TENANT_ID / INV_ENTRA_API_CLIENT_ID.")
             if self.auth_mode == "entra" and self.database_url.startswith("sqlite"):
-                raise ValueError("Con acceso multiusuario (entra) use MySQL, no SQLite.")
+                raise ValueError("Con acceso multiusuario (entra) use PostgreSQL o MySQL, no SQLite.")
         return self
 
     @property

@@ -4,7 +4,6 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
-    JSON,
     BigInteger,
     Boolean,
     DateTime,
@@ -17,7 +16,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.db import Base, utcnow
+from app.db import JSON, Base, utcnow
 
 DEVICE_STATUSES = ("active", "in_stock", "repair", "retired", "lost")
 

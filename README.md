@@ -3,13 +3,19 @@
 Plataforma interna de IT para el inventario de dispositivos, software, departamentos,
 autorizaciones e inventarios mensuales de Asserta Global Healthcare Solutions.
 
-Es una **aplicación web** que arranca sola en segundo plano en el equipo de IT y se
-usa desde el navegador en **http://127.0.0.1:8180**. Recoge datos de Microsoft Intune
-(Microsoft Graph) y de Panda Adaptive Defense (exportaciones), los normaliza, detecta
-cambios y genera evidencias de auditoría.
+Es una **aplicación web** que recoge datos de Microsoft Intune (Microsoft Graph) y de Panda
+Adaptive Defense (exportaciones), los normaliza, detecta cambios y genera evidencias de auditoría.
 
-## Instalación rápida
+## Despliegue en la nube (Vercel + Supabase)
 
+La interfaz y la API se publican en **Vercel**, los datos viven en **Supabase** (PostgreSQL, UE) y el
+worker de sincronización corre en **GitHub Actions**, lanzado cada hora por `pg_cron` y al momento
+desde la web. Inicio de sesión con Microsoft Entra ID y roles. Guía paso a paso, incluida la copia
+de los datos de la instalación de Windows: [docs/despliegue-nube.md](docs/despliegue-nube.md).
+
+## Instalación local en Windows (histórico, ya no se mantiene)
+
+Arranca sola en segundo plano y se usa en **http://127.0.0.1:8180**.
 Requisitos: Windows 10/11, Python 3.11+ y Node.js 20+ (solo para compilar la interfaz).
 No necesita permisos de administrador.
 
