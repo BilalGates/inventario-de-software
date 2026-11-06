@@ -1,17 +1,18 @@
 # Lo que la función de Vercel no necesita (reduce el tamaño del despliegue).
-backend/tests/
-backend/.venv/
-backend/*.db
-backend/alembic/
-deploy/
-docs/
-scripts/
-tools/
-utils/
-resources/
-infra/
-frontend/node_modules/
-frontend/e2e/
-frontend/test-results/
-*.lnk
-logo.png
+/backend/tests/
+/backend/.venv/
+/backend/*.db
+/backend/alembic/
+/deploy/
+/docs/
+/scripts/
+/tools/
+/utils/
+/resources/
+/infra/
+/frontend/node_modules/
+/frontend/e2e/
+/frontend/test-results/
+/*.lnk
+# Solo el de la raíz: frontend/public/logo.png es el de la interfaz.
+/logo.png

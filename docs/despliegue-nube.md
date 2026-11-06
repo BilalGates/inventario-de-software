@@ -157,7 +157,10 @@ La ruta de la base local está en `%LOCALAPPDATA%\InventarioAsserta\inventario.e
 
 1. *Add New › Project* → importe el repositorio `inventario-de-software`. **Root Directory**: la raíz
    del repositorio. *Framework Preset*: Other (la configuración está en `vercel.json`).
-2. *Environment Variables* (entorno Production):
+2. *Environment Variables*, en los entornos **Production y Preview**. **`INV_ENVIRONMENT` e
+   `INV_AUTH_MODE` son obligatorias:** sin ellas la aplicación funcionaría en modo desarrollo, sin
+   inicio de sesión y con acceso de administrador para cualquiera que abra la URL. Para evitarlo, en
+   Vercel la API se niega a arrancar si `INV_AUTH_MODE` no es `entra`.
 
    | Nombre | Valor |
    |---|---|
