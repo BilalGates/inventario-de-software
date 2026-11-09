@@ -6,8 +6,9 @@ import pytest
 
 from app.connectors.base import ConnectorError
 from app.connectors.graph import GraphClient
-from app.connectors.graph_delegated import DelegatedTokenProvider, DeviceCodeLogin, TokenStore
+from app.connectors.graph_delegated import DelegatedTokenProvider, DeviceCodeLogin, EncryptedSettingStore
 
+KEY = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="  # 32 bytes en base64, solo para pruebas
 ID_TOKEN = jwt.encode({"preferred_username": "it@asserta.test", "tid": "tenant-1"}, "k", algorithm="HS256")
 
 
@@ -15,15 +16,11 @@ def _http(handler) -> httpx.Client:
     return httpx.Client(transport=httpx.MockTransport(handler))
 
 
-def test_store_roundtrip_is_not_plaintext(tmp_path):
-    store = TokenStore(tmp_path / "t.bin")
-    store.save({"refresh_token": "secreto-rt"})
-    assert store.load() == {"refresh_token": "secreto-rt"}
-    store.delete()
-    assert not store.exists() and store.load() is None
+def _store(name: str = "secret.graph.session") -> EncryptedSettingStore:
+    return EncryptedSettingStore(name, KEY)
 
 
-def test_device_code_flow_saves_session(tmp_path):
+def test_device_code_flow_saves_session(engine):
     calls = {"token": 0}
 
     def handler(req: httpx.Request):
@@ -35,7 +32,7 @@ def test_device_code_flow_saves_session(tmp_path):
             return httpx.Response(400, json={"error": "authorization_pending"})
         return httpx.Response(200, json={"access_token": "at", "refresh_token": "rt", "id_token": ID_TOKEN})
 
-    store = TokenStore(tmp_path / "t.bin")
+    store = _store()
     login = DeviceCodeLogin(store, _http(handler))
     assert login.poll() == {"status": "idle"}
     assert login.start()["user_code"] == "ABC123"
@@ -46,21 +43,21 @@ def test_device_code_flow_saves_session(tmp_path):
     assert login.poll() == {"status": "idle"}
 
 
-def test_device_code_rejected(tmp_path):
+def test_device_code_rejected(engine):
     def handler(req):
         if req.url.path.endswith("/devicecode"):
             return httpx.Response(200, json={"device_code": "dc", "user_code": "X", "expires_in": 900, "interval": 0,
                                              "verification_uri": "u"})
         return httpx.Response(400, json={"error": "access_denied"})
 
-    login = DeviceCodeLogin(TokenStore(tmp_path / "t.bin"), _http(handler))
+    login = DeviceCodeLogin(_store(), _http(handler))
     login.start()
     assert login.poll()["status"] == "error"
-    assert not (tmp_path / "t.bin").exists()
+    assert not _store().exists()
 
 
-def test_provider_refreshes_and_rotates_refresh_token(tmp_path):
-    store = TokenStore(tmp_path / "t.bin")
+def test_provider_refreshes_and_rotates_refresh_token(engine):
+    store = _store()
     store.save({"refresh_token": "rt-1", "tenant_id": "tenant-1", "account": "it@asserta.test"})
     seen = []
 
@@ -79,17 +76,17 @@ def test_provider_refreshes_and_rotates_refresh_token(tmp_path):
     assert store.load()["refresh_token"] == "rt-2"
 
 
-def test_provider_expired_session(tmp_path):
-    store = TokenStore(tmp_path / "t.bin")
+def test_provider_expired_session(engine):
+    store = _store()
     store.save({"refresh_token": "rt"})
     provider = DelegatedTokenProvider(store, _http(lambda req: httpx.Response(400, json={"error": "invalid_grant"})))
     with pytest.raises(ConnectorError, match="caducado"):
         provider(True)
 
 
-def test_provider_without_session(tmp_path):
+def test_provider_without_session(engine):
     with pytest.raises(ConnectorError) as exc:
-        DelegatedTokenProvider(TokenStore(tmp_path / "no.bin"))(False)
+        DelegatedTokenProvider(_store("secret.vacia"))(False)
     assert exc.value.kind == "config"
 
 
@@ -98,19 +95,7 @@ def test_graph_client_still_requires_credentials_without_provider():
         GraphClient("", "")
 
 
-def test_token_never_written_in_clear(tmp_path):
-    store = TokenStore(tmp_path / "t.bin")
-    store.save({"refresh_token": "texto-reconocible"})
-    raw = (tmp_path / "t.bin").read_bytes()
-    import sys
-    if sys.platform == "win32":
-        assert b"texto-reconocible" not in raw
-    else:
-        assert json.loads(raw)["refresh_token"] == "texto-reconocible"
-
-
 # --------------------------------------------------------------------------- nube (sesión en la base)
-KEY = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="  # 32 bytes en base64, solo para pruebas
 
 
 def test_encrypted_store_in_database_is_not_plaintext(engine, db):

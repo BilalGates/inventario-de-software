@@ -11,8 +11,8 @@ de dispositivo; se introduce en https://microsoft.com/devicelogin con una cuenta
 Intune. Usa el cliente público "Microsoft Graph Command Line Tools" (el mismo que el script
 PowerShell) con el permiso delegado `DeviceManagementManagedDevices.Read.All`.
 
-- El refresh token se guarda cifrado con DPAPI en `%LOCALAPPDATA%\InventarioAsserta\graph_token.bin`
-  (o `INV_GRAPH_TOKEN_FILE`): solo lo descifra el mismo usuario de Windows en este equipo.
+- El refresh token se guarda en la base de datos cifrado con AES-GCM y `INV_TOKEN_ENCRYPTION_KEY`,
+  clave que solo conocen Vercel y GitHub Actions.
 - Se renueva solo en cada sincronización (Entra rota el refresh token y se guarda el nuevo).
 - Si caduca por inactividad o por políticas de acceso condicional, la ejecución falla con
   "La sesión de Microsoft ha caducado" y hay que volver a conectar.
@@ -89,9 +89,9 @@ reintentos con backoff. Diferencias con el conector:
 | Fallos parciales | Los guarda en `Errores_Inventario_Intune_<fecha>.csv` y sigue | Ejecución parcial: sin inferir bajas |
 | Hardware del equipo | No lo extrae | `managedDevices` completo (serie, modelo, RAM, disco, cifrado, cumplimiento…) |
 
-**Integración ya operativa (sin credenciales de aplicación):** el servicio vigila
-`INV_INTUNE_DROP_DIR` (por defecto `Escritorio\Inventario_Intune`, donde el script guarda sus CSV).
-Cada `Inventario_Programas_Intune_<fecha>.csv` se importa solo (separador `;`, columnas
+**Contingencia (sin sesión de Microsoft en la nube):** el CSV que genera el script
+(`Escritorio\Inventario_Intune\Inventario_Programas_Intune_<fecha>.csv`) se sube desde
+*Sincronización › Microsoft Intune › Importar CSV* y se importa (separador `;`, columnas
 `Equipo, Usuario, Programa, Version, Editor, PlataformaApp, SistemaOperativo, VersionSO,
 UltimaSincronizacion, AzureADDeviceId, IntuneDeviceId`): crea o concilia los equipos por id de
 Intune/Entra, asigna el usuario y carga el software. Se considera completa (y por tanto registra
@@ -113,9 +113,6 @@ WatchGuard Cloud, y la documentación del endpoint de inventario de software de 
 
 - Subida desde la ficha del dispositivo o desde *Sincronización* (reutiliza el parser estable
   `backend/app/parsers/panda.py`: tabulado, vertical o pegado sin tabuladores).
-- **Carpeta supervisada**: dejar `<HOSTNAME>.txt` en `INV_PANDA_DROP_DIR`
-  (por defecto `C:\ProgramData\InventarioAsserta\panda`). El worker los importa y los mueve a
-  `processed/` o `failed/`.
 - Panda complementa los dispositivos de Intune por hostname (único y no retirado). Si hay
   ambigüedad, se abre un caso de revisión.
 - Si el fichero tiene líneas no reconocidas o el número de programas cae bruscamente, no se

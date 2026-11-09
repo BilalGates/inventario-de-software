@@ -117,8 +117,7 @@ def test_vercel_requirements_match_backend_versions():
     assert needed <= set(vercel)
 
 
-@pytest.mark.parametrize("mode", ["dev", "local"])
-def test_vercel_refuses_to_start_without_login(monkeypatch, mode):
+def test_vercel_refuses_to_start_without_login(monkeypatch):
     """En Vercel la URL es pública: sin Entra cualquiera entraría como administrador."""
     from pydantic import ValidationError
 
@@ -126,7 +125,7 @@ def test_vercel_refuses_to_start_without_login(monkeypatch, mode):
 
     monkeypatch.setenv("VERCEL", "1")
     with pytest.raises(ValidationError, match="INV_AUTH_MODE=entra"):
-        Settings(auth_mode=mode, environment="development")
+        Settings(auth_mode="dev", environment="development")
 
 
 def test_vercel_with_entra_starts(monkeypatch):

@@ -4,11 +4,9 @@ Alternativa al registro de aplicación con secreto: el usuario inicia sesión un
 con su propia cuenta y el servicio guarda el refresh token para renovar el acceso solo.
 
 - Cliente público "Microsoft Graph Command Line Tools" (el mismo que usa el script PowerShell).
-- Instalación de Windows: el refresh token se guarda en un fichero cifrado con DPAPI (solo lo
-  descifra el usuario de Windows que lo guardó, en este equipo).
-- Nube (Vercel + GitHub Actions): no hay disco ni DPAPI. Se guarda en la base de datos cifrado con
-  AES-GCM y la clave INV_TOKEN_ENCRYPTION_KEY, que solo conocen Vercel y GitHub. El inicio de sesión
-  pendiente también va a la base: cada petición puede atenderla una instancia distinta.
+- El refresh token se guarda en la base de datos cifrado con AES-GCM y la clave
+  INV_TOKEN_ENCRYPTION_KEY, que solo conocen Vercel y GitHub Actions. El inicio de sesión pendiente
+  también va a la base: en Vercel cada petición puede atenderla una instancia distinta.
 - Nunca se registran tokens.
 """
 from __future__ import annotations
@@ -16,10 +14,8 @@ from __future__ import annotations
 import base64
 import json
 import os
-import sys
 import threading
 import time
-from pathlib import Path
 from typing import Any
 
 import httpx
@@ -30,60 +26,6 @@ from app.connectors.base import ConnectorError
 CLIENT_ID = "14d82eec-204b-4c2f-b7e8-296a70dab67e"  # Microsoft Graph Command Line Tools (app pública de Microsoft)
 SCOPE = "https://graph.microsoft.com/DeviceManagementManagedDevices.Read.All offline_access openid profile"
 LOGIN = "https://login.microsoftonline.com"
-
-
-# --------------------------------------------------------------------------- almacén cifrado
-def _dpapi(data: bytes, protect: bool) -> bytes:
-    import ctypes
-    from ctypes import wintypes
-
-    class Blob(ctypes.Structure):
-        _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_char))]
-
-    buf = ctypes.create_string_buffer(data, len(data))
-    src, out = Blob(len(data), ctypes.cast(buf, ctypes.POINTER(ctypes.c_char))), Blob()
-    crypt32 = ctypes.windll.crypt32
-    fn = crypt32.CryptProtectData if protect else crypt32.CryptUnprotectData
-    if not fn(ctypes.byref(src), None, None, None, None, 0x1, ctypes.byref(out)):  # 0x1: sin interfaz
-        raise OSError("DPAPI no pudo procesar el token guardado.")
-    try:
-        return ctypes.string_at(out.pbData, out.cbData)
-    finally:
-        ctypes.windll.kernel32.LocalFree(out.pbData)
-
-
-class TokenStore:
-    def __init__(self, path: str | Path):
-        self.path = Path(path)
-
-    def exists(self) -> bool:
-        return self.path.is_file()
-
-    def load(self) -> dict[str, Any] | None:
-        try:
-            raw = self.path.read_bytes()
-        except OSError:
-            return None
-        try:
-            if sys.platform == "win32":
-                raw = _dpapi(raw, protect=False)
-            return json.loads(raw)
-        except (OSError, ValueError):
-            return None
-
-    def save(self, data: dict[str, Any]) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        raw = json.dumps(data).encode()
-        if sys.platform == "win32":
-            raw = _dpapi(raw, protect=True)
-        tmp = self.path.with_suffix(".tmp")
-        tmp.write_bytes(raw)
-        if sys.platform != "win32":
-            os.chmod(tmp, 0o600)
-        os.replace(tmp, self.path)
-
-    def delete(self) -> None:
-        self.path.unlink(missing_ok=True)
 
 
 def _account(id_token: str | None) -> dict[str, str]:
@@ -117,13 +59,12 @@ def decode_key(secret: str) -> bytes:
 
 
 class EncryptedSettingStore:
-    """Mismo uso que TokenStore, pero en la tabla app_settings, cifrado con AES-GCM (para la nube)."""
+    """Almacén de un dict en la tabla app_settings, cifrado con AES-GCM (load/save/delete/exists)."""
 
     def __init__(self, setting_key: str, secret: str):
         from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
         self.setting_key = setting_key
-        self.path = f"db:{setting_key}"  # identifica el almacén (como la ruta del fichero en TokenStore)
         self._aes = AESGCM(decode_key(secret))
 
     def _row(self, db):
@@ -178,7 +119,7 @@ class DeviceCodeLogin:
     memoria o, si se da pending_store, en ese almacén (necesario cuando cada petición la atiende
     una instancia distinta, como en Vercel)."""
 
-    def __init__(self, store: TokenStore, http: httpx.Client | None = None, pending_store: Any = None):
+    def __init__(self, store: EncryptedSettingStore, http: httpx.Client | None = None, pending_store: Any = None):
         self.store = store
         self.pending_store = pending_store
         self.http = http or httpx.Client(timeout=httpx.Timeout(30.0, connect=15.0))
@@ -257,7 +198,7 @@ class DeviceCodeLogin:
 class DelegatedTokenProvider:
     """Entrega access tokens a GraphClient renovándolos con el refresh token guardado."""
 
-    def __init__(self, store: TokenStore, http: httpx.Client | None = None):
+    def __init__(self, store: EncryptedSettingStore, http: httpx.Client | None = None):
         self.store = store
         self.http = http or httpx.Client(timeout=httpx.Timeout(30.0, connect=15.0))
         self._token: str | None = None

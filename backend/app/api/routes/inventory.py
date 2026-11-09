@@ -142,7 +142,6 @@ def retry_run(run_id: int, db: Session = Depends(get_db), user: CurrentUser = Te
 # --------------------------------------------------------------------------- fuentes
 @router.get("/sources")
 def list_sources(db: Session = Depends(get_db), _: CurrentUser = Reader):
-    s = get_settings()
     out = []
     for src in db.execute(select(InventorySource).order_by(InventorySource.priority)).scalars():
         last = db.execute(select(InventoryRun).where(InventoryRun.source_id == src.id)
@@ -160,8 +159,7 @@ def list_sources(db: Session = Depends(get_db), _: CurrentUser = Reader):
                     "priority": src.priority, "config": src.config or {}, "configured": configured,
                     "last_success_at": src.last_success_at, "last_error": src.last_error,
                     "last_run": _run(last) if last else None, "devices": devices,
-                    "devices_with_software": devices_sw,
-                    "watch_folder": bool(s.panda_drop_dir) if src.code == "panda" else None})
+                    "devices_with_software": devices_sw})
     return out
 
 
@@ -175,21 +173,12 @@ def _graph_status() -> dict:
     return {"graph_auth": None, "graph_account": None}
 
 
-_device_login: DeviceCodeLogin | None = None
-
-
 def _login() -> DeviceCodeLogin:
-    global _device_login
+    """El estado vive en la base (cifrado): cada petición, sea cual sea la instancia, crea su objeto."""
     store = graph_session.token_store()
     if store is None:
-        raise HTTPException(409, "No hay dónde guardar la sesión de Microsoft: configure INV_TOKEN_ENCRYPTION_KEY "
-                                 "(nube) o INV_GRAPH_TOKEN_FILE (Windows).")
-    pending = graph_session.pending_store()
-    if pending is not None:  # nube: el estado vive en la base, cada petición crea su objeto
-        return DeviceCodeLogin(store, pending_store=pending)
-    if _device_login is None or _device_login.store.path != store.path:
-        _device_login = DeviceCodeLogin(store)
-    return _device_login
+        raise HTTPException(409, "No hay dónde guardar la sesión de Microsoft: configure INV_TOKEN_ENCRYPTION_KEY.")
+    return DeviceCodeLogin(store, pending_store=graph_session.pending_store())
 
 
 @router.post("/sources/intune/connect")
@@ -264,8 +253,7 @@ def get_settings_api(db: Session = Depends(get_db), _: CurrentUser = Reader):
     hb = db.get(AppSetting, "worker.heartbeat")
     out["worker.heartbeat"] = hb.value if hb else None
     s = get_settings()
-    out["runtime"] = {"environment": s.environment, "auth_mode": s.auth_mode, "graph_configured": graph_session.configured(),
-                      "panda_drop_dir_configured": bool(s.panda_drop_dir), "stale_device_days": s.stale_device_days}
+    out["runtime"] = {"environment": s.environment, "auth_mode": s.auth_mode, "graph_configured": graph_session.configured(), "stale_device_days": s.stale_device_days}
     return out
 
 

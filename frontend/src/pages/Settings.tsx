@@ -11,7 +11,7 @@ interface SettingsData {
   "schedule.monthly": { enabled: boolean; day: number; hour: number; sources: string[] };
   "alerts.stale_source_days": number;
   "worker.heartbeat": { at: string } | null;
-  runtime: { environment: string; auth_mode: string; graph_configured: boolean; panda_drop_dir_configured: boolean; stale_device_days: number };
+  runtime: { environment: string; auth_mode: string; graph_configured: boolean; stale_device_days: number };
 }
 
 export default function SettingsPage() {
@@ -36,12 +36,11 @@ export default function SettingsPage() {
             ["Entorno", rt.environment], ["Versión", config.version],
             ["Autenticación", rt.auth_mode === "entra" ? "Microsoft Entra ID" : <Badge key="a" tone="warn">Modo desarrollo</Badge>],
             ["Credenciales de Graph", rt.graph_configured ? <Badge key="g" tone="ok">Configuradas</Badge> : <Badge key="g" tone="warn">Pendientes</Badge>],
-            ["Carpeta supervisada Panda", rt.panda_drop_dir_configured ? "Configurada" : "No configurada"],
             ["Worker", s["worker.heartbeat"] ? `Activo ${fmtRelative(s["worker.heartbeat"].at)}` : <Badge key="w" tone="danger">Sin actividad</Badge>],
             ["Dispositivo «no observado» tras", `${rt.stale_device_days} días`],
             ["Alerta de fuente sin sincronizar tras", `${s["alerts.stale_source_days"]} días`],
           ]} />
-          <p className="mt-4 text-xs text-muted">Las credenciales y secretos se configuran en variables de entorno del servidor, nunca desde la aplicación (ver docs/deployment.md).</p>
+          <p className="mt-4 text-xs text-muted">Las credenciales y secretos se configuran en variables de entorno del servidor, nunca desde la aplicación (Vercel y GitHub; ver docs/despliegue-nube.md).</p>
         </Card>
         {(sources.data ?? []).filter((x) => x.code === "intune").map((src) => <IntuneConfig key={src.code} src={src} disabled={!can.admin} />)}
         <Card title="Usuarios y permisos">
