@@ -20,6 +20,7 @@ no se ha verificado un endpoint estable en Graph v1.0 para él. Ver docs/integra
 """
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import Any
 
@@ -62,13 +63,26 @@ def _key(name: Any) -> str:
     return str(name or "").strip().lower()
 
 
-def _device_type(os_name: str | None) -> str | None:
+# Portátil/sobremesa por familia de modelo (Intune no lo informa en v1.0). Lo que no encaja queda
+# sin clasificar: nunca se inventa, y una clasificación manual no se pisa (ver apply_record).
+_LAPTOP = re.compile(r"latitude|xps|inspiron|2n1|2-in-1|dell pro (14|16)|dell (14|16) |\bgram\b|\d{2}z9\dq|"
+                     r"thinkpad|elitebook|probook|zbook|surface (laptop|pro|book)|macbook")
+_DESKTOP = re.compile(r"optiplex|precision (tower|t\d)|precision \d{4} tower|elitedesk|prodesk|thinkcentre|"
+                      r"vostro \d+ (tower|small)|imac|mac mini|dell pro (slim|tower|micro)")
+
+
+def _device_type(os_name: str | None, model: str | None = None) -> str | None:
     os_l = (os_name or "").lower()
     if os_l in {"ios", "ipados", "android"}:
         return "mobile"
     if "server" in os_l:
         return "server"
-    return None  # portátil/sobremesa no se deduce del SO: se clasifica manualmente
+    model_l = (model or "").lower()
+    if _DESKTOP.search(model_l):
+        return "desktop"
+    if _LAPTOP.search(model_l):
+        return "laptop"
+    return None
 
 
 def map_device(d: dict) -> DeviceRecord:
@@ -86,7 +100,7 @@ def map_device(d: dict) -> DeviceRecord:
         model=_text(d.get("model")),
         os_name=_text(d.get("operatingSystem")),
         os_version=_text(d.get("osVersion")),
-        device_type=_device_type(d.get("operatingSystem")),
+        device_type=_device_type(d.get("operatingSystem"), d.get("model")),
         user_upn=upn.lower() if upn else None,
         user_display_name=_text(d.get("userDisplayName")),
         ram_bytes=_positive(d.get("physicalMemoryInBytes")),
@@ -131,7 +145,18 @@ class IntuneConnector:
         # 2. Software.
         device_keys = {d.key for d in result.devices}
         if strategy == "per_device":
+            errors_before = len(result.errors)
             self._software_per_device(result, device_keys, log)
+            if device_keys and len(result.errors) - errors_before == len(device_keys):
+                # La ruta beta falla en todos los equipos (p. ej. Microsoft la retira): se repite con
+                # la estrategia v1.0 en esta misma ejecución en lugar de quedarse sin software.
+                del result.errors[errors_before:]
+                result.warnings.append("La lectura de software por equipo (beta) falló en todos los equipos; "
+                                       "se ha usado la estrategia por aplicación (v1.0), más lenta.")
+                log(result.warnings[-1])
+                result.stats["software_strategy_fallback"] = True
+                strategy = "per_app"
+                self._software_per_app(result, device_keys, log)
         else:
             self._software_per_app(result, device_keys, log)
 
@@ -164,23 +189,23 @@ class IntuneConnector:
 
     def _compliance_details(self, result: ExtractResult, log) -> None:
         """Motivo de la no conformidad, solo en los equipos que fallan (pocas llamadas). No es esencial:
-        sin el permiso DeviceManagementConfiguration.Read.All se avisa y se sigue."""
+        sin permiso o sin sesión válida se avisa y se sigue con el software."""
         failing = [d for d in result.devices if (d.compliance_state or "").lower() in DEVICE_FAILING]
         for dev in result.devices:
-            if (dev.compliance_state or "").lower() == "compliant":
-                dev.compliance_details = {"policies": []}  # conforme: se limpia el motivo anterior
+            if (dev.compliance_state or "").lower() not in DEVICE_FAILING:
+                dev.compliance_details = {"policies": []}  # ya no falla: se limpia el motivo anterior
         failures = 0
         for dev in failing:
             try:
                 dev.compliance_details = fetch_compliance(self.client, dev.key, self.api.strip("/"))
+                dev.compliance_checked = True
             except ConnectorError as exc:
-                if exc.kind == "permission":
-                    result.warnings.append("Sin permiso para leer el detalle de conformidad "
-                                           "(DeviceManagementConfiguration.Read.All); vuelva a conectar Intune.")
+                if exc.kind in ("permission", "auth"):
+                    result.warnings.append("No se pudo leer el detalle de conformidad (falta el permiso "
+                                           "DeviceManagementConfiguration.Read.All o la sesión no es válida); "
+                                           "vuelva a conectar Intune.")
                     log(result.warnings[-1])
                     return
-                if exc.kind == "auth":
-                    raise
                 failures += 1
         if failing:
             log(f"Intune: detalle de conformidad de {len(failing) - failures}/{len(failing)} equipos no conformes.")

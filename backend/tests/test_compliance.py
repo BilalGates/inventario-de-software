@@ -37,7 +37,7 @@ def test_fetch_only_failing_policies_and_settings():
     assert [p["name"] for p in details["policies"]] == ["Seguridad Windows"]
     assert [s["label"] for s in details["policies"][0]["settings"]] == [
         "BitLocker desactivado", "Firmas de Defender desactualizadas"]
-    assert reasons(details) == ["BitLocker desactivado", "Firmas de Defender desactualizadas"]
+    assert reasons(details, "noncompliant") == ["BitLocker desactivado", "Firmas de Defender desactualizadas"]
 
 
 def test_fetch_falls_back_to_beta_when_v1_has_no_settings():
@@ -45,7 +45,7 @@ def test_fetch_falls_back_to_beta_when_v1_has_no_settings():
     fake.compliance["intune-1"] = [policy("Seguridad Windows", "nonCompliant")]
     fake.compliance_beta["intune-1"] = [policy("Seguridad Windows", "nonCompliant", (BITLOCKER, "nonCompliant"))]
     details = fetch_compliance(fake.client(), "intune-1")
-    assert reasons(details) == ["BitLocker desactivado"]
+    assert reasons(details, "noncompliant") == ["BitLocker desactivado"]
 
 
 def test_sync_stores_reasons_and_clears_them_when_compliant(db):
@@ -54,7 +54,7 @@ def test_sync_stores_reasons_and_clears_them_when_compliant(db):
     db.commit()
     runs.execute_run(db, run, factory=lambda src, params: IntuneConnector(fake.client()))
     pc2 = db.execute(select(Device).where(Device.hostname == "PC-002")).scalar_one()
-    assert reasons(pc2.compliance_details) == ["BitLocker desactivado", "Firmas de Defender desactualizadas"]
+    assert reasons(pc2.compliance_details, pc2.compliance_state) == ["BitLocker desactivado", "Firmas de Defender desactualizadas"]
     assert pc2.compliance_checked_at is not None
     # Solo se pide el detalle de los no conformes.
     assert not any("intune-1/deviceCompliancePolicyStates" in c for c in fake.calls)
@@ -127,3 +127,81 @@ def test_manual_device_without_intune_id(api):
     client, _, _, _ = api
     dev = client.post("/api/devices", json={"hostname": "MANUAL-1"}).json()
     assert client.get(f"/api/devices/{dev['id']}/compliance", params={"refresh": True}).status_code == 409
+
+
+def _sync(db, fake):
+    run = runs.enqueue(db, "intune", "manual", "tester")
+    db.commit()
+    return runs.execute_run(db, run, factory=lambda src, params: IntuneConnector(fake.client()))
+
+
+def test_any_non_failing_state_clears_reasons(db):
+    fake = _fake()
+    _sync(db, fake)
+    fake.devices[1]["complianceState"] = "unknown"
+    _sync(db, fake)
+    pc2 = db.execute(select(Device).where(Device.hostname == "PC-002")).scalar_one()
+    assert pc2.compliance_details == {"policies": []}
+    assert reasons(pc2.compliance_details, pc2.compliance_state) == []
+
+
+def test_checked_at_only_moves_when_graph_was_queried(db):
+    fake = _fake()
+    _sync(db, fake)
+    pc1 = db.execute(select(Device).where(Device.hostname == "PC-001")).scalar_one()
+    assert pc1.compliance_checked_at is None  # conforme: no se consultó su detalle
+
+
+def test_auth_error_in_compliance_step_does_not_block_software(monkeypatch):
+    from app.connectors import intune as intune_mod
+    from app.connectors.base import ConnectorError
+
+    def boom(*a, **k):
+        raise ConnectorError("sesión caducada", kind="auth")
+
+    monkeypatch.setattr(intune_mod, "fetch_compliance", boom)
+    fake = FakeGraph([device(1, complianceState="noncompliant")], {"Chrome|Google|1": ["intune-1"]})
+    result = IntuneConnector(fake.client()).extract({}, lambda m: None)
+    assert result.complete and len(result.installs) == 1
+    assert any("conformidad" in w for w in result.warnings)
+
+
+def test_refresh_requires_technician(api):
+    client, _, dev_id, as_role = api
+    as_role("auditor")
+    assert client.get(f"/api/devices/{dev_id}/compliance").status_code == 200
+    assert client.get(f"/api/devices/{dev_id}/compliance", params={"refresh": True}).status_code == 403
+
+
+def test_refresh_records_history_and_respects_manual_value(api, db):
+    from app.models import InventoryChange
+
+    client, fake, dev_id, _ = api
+    fake.devices[1]["complianceState"] = "compliant"
+    fake.compliance["intune-2"] = []
+    body = client.get(f"/api/devices/{dev_id}/compliance", params={"refresh": True}).json()
+    assert body["compliance_state"] == "compliant" and body["policies"] == []
+    change = db.execute(select(InventoryChange).where(InventoryChange.device_id == dev_id,
+                                                      InventoryChange.field == "compliance_state")).scalar_one()
+    assert (change.old_value, change.new_value) == ("noncompliant", "compliant")
+
+    pc2 = db.get(Device, dev_id)
+    pc2.compliance_state = "noncompliant"
+    pc2.field_sources = {**pc2.field_sources, "compliance_state": {"source": "manual", "at": "2026-11-09T00:00:00"}}
+    db.commit()
+    client.get(f"/api/devices/{dev_id}/compliance", params={"refresh": True})
+    db.expire_all()
+    assert db.get(Device, dev_id).compliance_state == "noncompliant"  # el valor manual prevalece
+
+
+def test_refresh_and_actions_use_configured_api_version(api, db):
+    from app.models import InventorySource
+
+    client, fake, dev_id, _ = api
+    src = db.execute(select(InventorySource).where(InventorySource.code == "intune")).scalar_one()
+    src.config = {**(src.config or {}), "api_version": "beta"}
+    db.commit()
+    client.get(f"/api/devices/{dev_id}/compliance", params={"refresh": True})
+    client.post(f"/api/devices/{dev_id}/intune-actions", json={"action": "sync"})
+    assert "GET /beta/deviceManagement/managedDevices/intune-2/deviceCompliancePolicyStates" in fake.calls
+    assert "POST /beta/deviceManagement/managedDevices/intune-2/syncDevice" in fake.calls

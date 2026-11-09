@@ -5,7 +5,7 @@ import { ComplianceBadge } from "@/components/badges";
 import { Button, Card, ConfirmDialog, ErrorState, Spinner } from "@/components/ui";
 import { api } from "@/lib/api";
 import { useCan } from "@/lib/auth";
-import { fmtDateTime } from "@/lib/format";
+import { fmtDateTime, isFailing } from "@/lib/format";
 import { useAction } from "@/lib/hooks";
 import type { DeviceCompliance, IntuneAction } from "@/lib/types";
 
@@ -34,15 +34,15 @@ export function CompliancePanel({ deviceId, className }: { deviceId: number; cla
   if (q.error || !q.data) return <Card title="Conformidad" className={className}><ErrorState error={q.error} retry={q.refetch} /></Card>;
   const c = q.data;
   const label = (code: IntuneAction) => c.actions.find((a) => a.code === code)?.label ?? code;
-  const failing = c.compliance_state != null && c.compliance_state !== "compliant";
+  const failing = isFailing(c.compliance_state);
 
   return (
     <Card title="Conformidad (Intune)" className={className} actions={c.intune_device_id && (
       <div className="flex flex-wrap items-center gap-2">
         <a className="inline-flex items-center gap-1 text-xs text-muted hover:text-fg" href={intuneUrl(c.intune_device_id)}
           target="_blank" rel="noreferrer">Abrir en Intune <ExternalLink className="size-3" /></a>
-        <Button size="sm" icon={<RefreshCw className="size-3.5" />} loading={refresh.isPending}
-          onClick={() => refresh.mutate(undefined)}>Consultar ahora</Button>
+        {can.write && <Button size="sm" icon={<RefreshCw className="size-3.5" />} loading={refresh.isPending}
+          onClick={() => refresh.mutate(undefined)}>Consultar ahora</Button>}
       </div>
     )}>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
@@ -54,15 +54,15 @@ export function CompliancePanel({ deviceId, className }: { deviceId: number; cla
 
       {!c.intune_device_id && <p className="mt-3 text-sm text-muted">Este equipo no está gestionado por Intune.</p>}
 
-      {c.intune_device_id && c.policies.length > 0 && (
+      {c.intune_device_id && failing && c.policies.length > 0 && (
         <ul className="mt-4 space-y-3">
-          {c.policies.map((p) => (
-            <li key={p.name} className="rounded-md border border-border p-3">
+          {c.policies.map((p, i) => (
+            <li key={`${i}-${p.name}`} className="rounded-md border border-border p-3">
               <p className="text-xs text-muted">Directiva · <span className="text-fg-2">{p.name}</span></p>
               {p.settings.length === 0 && <p className="mt-1 text-sm">Intune no detalla qué ajuste falla. Sincronice el equipo y vuelva a consultar.</p>}
               <ul className="mt-2 space-y-2">
-                {p.settings.map((s) => (
-                  <li key={`${p.name}-${s.setting ?? s.label}`} className="flex flex-wrap items-start justify-between gap-2">
+                {p.settings.map((s, j) => (
+                  <li key={`${j}-${s.setting ?? s.label}`} className="flex flex-wrap items-start justify-between gap-2">
                     <div className="min-w-0">
                       <p className="text-sm font-medium text-signal">{s.label}</p>
                       {s.hint && <p className="text-xs text-fg-2">{s.hint}</p>}
@@ -82,11 +82,14 @@ export function CompliancePanel({ deviceId, className }: { deviceId: number; cla
       {c.intune_device_id && c.policies.length === 0 && failing && (
         <p className="mt-3 text-sm text-fg-2">
           {c.checked_at ? "Intune no informa de ninguna directiva en fallo. Puede estar pendiente de evaluar: sincronice el equipo y vuelva a consultar."
-            : "Pulse «Consultar ahora» para ver qué directiva falla."}
+            : can.write ? "Pulse «Consultar ahora» para ver qué directiva falla." : "El motivo aún no se ha consultado."}
         </p>
       )}
-      {c.intune_device_id && !failing && c.compliance_state && (
+      {c.intune_device_id && c.compliance_state?.toLowerCase() === "compliant" && (
         <p className="mt-3 flex items-center gap-1.5 text-sm text-fg-2"><ShieldCheck className="size-4" /> Cumple todas las directivas asignadas.</p>
+      )}
+      {c.intune_device_id && c.compliance_state && !failing && c.compliance_state.toLowerCase() !== "compliant" && (
+        <p className="mt-3 text-sm text-fg-2">Intune aún no ha determinado la conformidad de este equipo o no le aplica ninguna directiva.</p>
       )}
 
       {c.intune_device_id && can.write && (

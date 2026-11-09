@@ -47,7 +47,7 @@ function renderAt(path: string, role: Me["role"]) {
   const me: Me = { upn: "x@test", name: "X", role, permissions: { read: true, write: role !== "auditor", admin: role === "admin" } };
   return render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-      <MemoryRouter initialEntries={[path]}>
+      <MemoryRouter initialEntries={[path]} future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <ToastProvider><TestAuthProvider me={me}><App /></TestAuthProvider></ToastProvider>
       </MemoryRouter>
     </QueryClientProvider>,

@@ -118,8 +118,17 @@ function GraphConnection({ source }: { source: Source }) {
   return (
     <>
       {source.graph_auth === "delegated" ? (
-        <p className="mt-3 text-xs text-muted">Conectado como <span className="font-medium text-fg">{source.graph_account ?? "cuenta de Microsoft"}</span>
-          {can.admin && <> · <button className="link" onClick={() => setConfirmOff(true)}>Desconectar</button></>}</p>
+        <>
+          <p className="mt-3 text-xs text-muted">Conectado como <span className="font-medium text-fg">{source.graph_account ?? "cuenta de Microsoft"}</span>
+            {can.admin && <> · <button className="link" onClick={() => setConfirmOff(true)}>Desconectar</button></>}</p>
+          {source.graph_read_only && (
+            <p className="mt-1.5 text-xs text-signal">Sesión con permisos de solo lectura: para ver el motivo de la no conformidad
+              y lanzar acciones remotas, desconecte y vuelva a conectar{can.admin && <> (<button className="link" disabled={connect.isPending}
+                onClick={() => connect.mutate(undefined)}>reconectar ahora</button>)</>}.</p>
+          )}
+          <p className="mt-1.5 text-xs text-muted">Sesión con el cliente público de Microsoft (Graph Command Line Tools). Para
+            producción se recomienda un registro de aplicación propio: ver docs/integrations.md.</p>
+        </>
       ) : can.admin && (
         <div className="mt-3"><Button size="sm" icon={<LogIn className="size-3.5" />} loading={connect.isPending}
           onClick={() => connect.mutate(undefined)}>Conectar con Microsoft</Button></div>

@@ -2,6 +2,7 @@ import httpx
 import pytest
 
 from app.connectors.base import ConnectorError
+from app.connectors.graph import GraphClient
 from app.connectors.intune import IntuneConnector, map_device
 from tests.fakes import FakeGraph, device
 
@@ -125,3 +126,56 @@ def test_per_device_does_not_trust_empty_lists():
     assert result.installs[0].publisher == "x"  # el editor sale del catálogo, no del $expand de beta
     assert all(i.source_app_id != "pkg-sistema" for i in result.installs)
     assert sum(c.startswith("GET /beta/deviceManagement/managedDevices/") for c in fake.calls) == 2  # una por equipo
+
+
+def test_actions_are_not_retried():
+    fake = FakeGraph([device(1)], {})
+    fake.fail = lambda req: httpx.Response(503) if req.method == "POST" else None
+    with pytest.raises(ConnectorError):
+        fake.client().post("/v1.0/deviceManagement/managedDevices/intune-1/syncDevice")
+    assert sum(c.startswith("POST /v1.0") for c in fake.calls) == 1
+
+
+def test_action_timeout_is_reported_as_uncertain():
+    def handler(req):
+        if req.method == "POST" and req.url.host == "graph.microsoft.com":
+            raise httpx.ReadTimeout("lento", request=req)
+        return httpx.Response(200, json={"access_token": "tok", "expires_in": 3600})
+
+    client = GraphClient("t", "c", "s", http=httpx.Client(transport=httpx.MockTransport(handler)),
+                         sleep=lambda s: None)
+    with pytest.raises(ConnectorError, match="incierto"):
+        client.post("/v1.0/deviceManagement/managedDevices/x/windowsDefenderScan", json={"quickScan": True})
+    assert client.request_count == 1
+
+
+def test_action_with_non_json_body_is_accepted():
+    fake = FakeGraph([device(1)], {})
+    fake.fail = lambda req: httpx.Response(202, text="Accepted") if req.method == "POST" else None
+    assert fake.client().post("/v1.0/deviceManagement/managedDevices/intune-1/syncDevice") == {}
+
+
+@pytest.mark.parametrize("model, expected", [
+    ("Latitude 7350", "laptop"), ("Inspiron 5491 2n1", "laptop"), ("XPS 13 9370", "laptop"),
+    ("Dell Pro 16 Plus PB16250", "laptop"), ("Dell Pro 14 Plus PB14250", "laptop"), ("Dell 16 DC16251", "laptop"),
+    ("17Z90Q-G.AD78B", "laptop"), ("XPS 14 (Dell 14 Premium) DA14260", "laptop"), ("Inspiron 15 3530", "laptop"),
+    ("OptiPlex 7010", "desktop"), ("Precision 3680 Tower", "desktop"),
+    ("Virtual Machine", None), (None, None),
+])
+def test_device_type_from_model(model, expected):
+    assert map_device(device(1, model=model)).device_type == expected
+
+
+def test_mobile_and_server_come_from_os():
+    assert map_device(device(1, operatingSystem="iOS", model="iPhone 15")).device_type == "mobile"
+    assert map_device(device(1, operatingSystem="Windows Server", model="OptiPlex")).device_type == "server"
+
+
+def test_per_device_falls_back_to_per_app_when_beta_is_gone():
+    fake = FakeGraph([device(1), device(2)], APPS)
+    fake.fail = lambda req: (httpx.Response(400, json={"error": {"code": "BadRequest"}})
+                             if req.url.params.get("$expand") == "detectedApps" else None)
+    result = IntuneConnector(fake.client()).extract({"software_strategy": "per_device"}, lambda m: None)
+    assert result.complete and result.stats["software_strategy"] == "per_app"
+    assert result.stats["software_strategy_fallback"] is True
+    assert {i.name for i in result.installs} == {"Google Chrome", "7-Zip 23.01 (x64)", "Notepad++"}

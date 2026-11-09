@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.api.common import Page, export_response, not_found, paginate
 from app.connectors import intune_compliance
-from app.connectors.base import ConnectorError
+from app.connectors.base import ConnectorError, DeviceRecord
 from app.core.config import get_settings
 from app.core.security import CurrentUser, Reader, Technician
 from app.db import get_db, utcnow
@@ -21,13 +21,14 @@ from app.models import (
     DeviceExternalId,
     DeviceType,
     InventoryChange,
+    InventorySource,
     SoftwareInstallation,
     SoftwareProduct,
     SoftwareVersion,
     User,
 )
 from app.services import audit, graph_session
-from app.services.devices import reassign, upsert_user
+from app.services.devices import apply_record, reassign, upsert_user
 from app.services.normalization import hostname_key
 from app.services.software import PolicyEvaluator
 
@@ -71,7 +72,7 @@ def serialize(d: Device, stale_days: int, extra: dict | None = None) -> dict:
         "primary_user": (d.primary_user.display_name or d.primary_user.upn) if d.primary_user else None,
         "primary_user_upn": d.primary_user.upn if d.primary_user else None,
         "location": d.location, "compliance_state": d.compliance_state, "encrypted": d.encrypted,
-        "compliance_reasons": intune_compliance.reasons(d.compliance_details),
+        "compliance_reasons": intune_compliance.reasons(d.compliance_details, d.compliance_state),
         "ram_bytes": d.ram_bytes, "storage_total_bytes": d.storage_total_bytes,
         "last_seen_at": d.last_seen_at, "last_seen_source": d.last_seen_source,
         "source_last_sync_at": d.source_last_sync_at, **(extra or {}),
@@ -284,23 +285,29 @@ def _graph_http_error(exc: ConnectorError, need: str) -> HTTPException:
 
 
 @router.get("/{device_id}/compliance")
-def device_compliance(device_id: int, refresh: bool = False, db: Session = Depends(get_db), _: CurrentUser = Reader):
-    """Detalle guardado (última sincronización) o, con refresh, consultado ahora a Intune."""
+def device_compliance(device_id: int, refresh: bool = False, db: Session = Depends(get_db),
+                      user: CurrentUser = Reader):
+    """Detalle guardado (última sincronización) o, con refresh (rol técnico), consultado ahora a Intune."""
     if not refresh:
         d = db.get(Device, device_id)
         if d is None:
             raise not_found("Dispositivo")
         return _compliance_payload(d)
+    if not user.can("technician"):
+        raise HTTPException(403, "Consultar Intune requiere el rol técnico.")
     d, intune_id = _intune_device(db, device_id)
+    api = graph_session.intune_api_version(db)
     client = graph_session.make_client()
     try:
-        body = client.get(f"/v1.0/deviceManagement/managedDevices/{intune_id}", {"$select": "id,complianceState"})
-        details = intune_compliance.fetch_compliance(client, intune_id)
+        body = client.get(f"/{api}/deviceManagement/managedDevices/{intune_id}", {"$select": "id,complianceState"})
+        details = intune_compliance.fetch_compliance(client, intune_id, api)
     except ConnectorError as exc:
         raise _graph_http_error(exc, "DeviceManagementConfiguration.Read.All") from exc
-    if body.get("complianceState"):
-        d.compliance_state = body["complianceState"]
-    d.compliance_details, d.compliance_checked_at = details, utcnow()
+    # Igual que la sincronización: respeta la prioridad de fuentes, la procedencia y el historial.
+    priorities = {s.code: s.priority for s in db.execute(select(InventorySource)).scalars()}
+    rec = DeviceRecord(key=intune_id, compliance_state=body.get("complianceState") or None,
+                       compliance_details=details, compliance_checked=True)
+    apply_record(db, d, rec, "intune", priorities.get("intune", 1000), priorities, None, utcnow())
     db.commit()
     return _compliance_payload(d)
 
@@ -314,7 +321,8 @@ def device_intune_action(device_id: int, body: IntuneActionIn, db: Session = Dep
                          user: CurrentUser = Technician):
     d, intune_id = _intune_device(db, device_id)
     try:
-        label = intune_compliance.run_action(graph_session.make_client(), intune_id, body.action)
+        label = intune_compliance.run_action(graph_session.make_client(), intune_id, body.action,
+                                             graph_session.intune_api_version(db))
     except ConnectorError as exc:
         raise _graph_http_error(exc, "DeviceManagementManagedDevices.PrivilegedOperations.All") from exc
     audit.record(db, user.upn, "device.intune_action", "device", d.id, f"{label}: {d.display_name}")

@@ -6,7 +6,13 @@ import pytest
 
 from app.connectors.base import ConnectorError
 from app.connectors.graph import GraphClient
-from app.connectors.graph_delegated import DelegatedTokenProvider, DeviceCodeLogin, EncryptedSettingStore
+from app.connectors.graph_delegated import (
+    READ_SCOPE,
+    SCOPE,
+    DelegatedTokenProvider,
+    DeviceCodeLogin,
+    EncryptedSettingStore,
+)
 
 KEY = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="  # 32 bytes en base64, solo para pruebas
 ID_TOKEN = jwt.encode({"preferred_username": "it@asserta.test", "tid": "tenant-1"}, "k", algorithm="HS256")
@@ -82,6 +88,44 @@ def test_provider_expired_session(engine):
     provider = DelegatedTokenProvider(store, _http(lambda req: httpx.Response(400, json={"error": "invalid_grant"})))
     with pytest.raises(ConnectorError, match="caducado"):
         provider(True)
+
+
+def _scopes(req: httpx.Request) -> str:
+    from urllib.parse import parse_qs
+    return parse_qs(req.content.decode())["scope"][0]
+
+
+def test_refresh_never_asks_for_default_scope(engine):
+    store = _store()
+    store.save({"refresh_token": "rt"})
+    asked = []
+
+    def handler(req):
+        asked.append(_scopes(req))
+        return httpx.Response(200, json={"access_token": "at", "expires_in": 3600})
+
+    DelegatedTokenProvider(store, _http(handler))(True)
+    assert asked == [SCOPE] and ".default" not in asked[0]
+
+
+def test_old_session_without_consent_falls_back_to_read_only(engine):
+    store = _store()
+    store.save({"refresh_token": "rt"})
+    asked = []
+
+    def handler(req):
+        asked.append(_scopes(req))
+        if _scopes(req) == SCOPE:
+            return httpx.Response(400, json={"error": "invalid_grant", "error_codes": [65001]})
+        return httpx.Response(200, json={"access_token": "at-read", "expires_in": 3600})
+
+    assert DelegatedTokenProvider(store, _http(handler))(True) == "at-read"
+    assert asked == [SCOPE, READ_SCOPE]
+    assert store.load()["scopes"] == "read"
+    # Las siguientes renovaciones ya van directas a solo lectura.
+    asked.clear()
+    DelegatedTokenProvider(store, _http(handler))(True)
+    assert asked == [READ_SCOPE]
 
 
 def test_provider_without_session(engine):

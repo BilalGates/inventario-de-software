@@ -114,6 +114,9 @@ class GraphClient:
     def _request(self, method: str, path_or_url: str, params: dict[str, Any] | None = None,
                  json: dict[str, Any] | None = None) -> dict:
         url = path_or_url if path_or_url.startswith("http") else f"{self.base_url}{path_or_url}"
+        # Solo las lecturas se reintentan: repetir una acción (POST) que Graph quizá ya ejecutó la
+        # lanzaría dos veces. Excepción: si la conexión ni se estableció, la petición no salió.
+        idempotent = method == "GET"
         refreshed = False
         attempt = 0
         while True:
@@ -123,13 +126,24 @@ class GraphClient:
                 self.request_count += 1
                 resp = self.http.request(method, url, params=params, headers=headers, json=json)
             except httpx.HTTPError as exc:
+                if not idempotent and not isinstance(exc, httpx.ConnectError):
+                    raise ConnectorError(f"Error de red con Graph ({type(exc).__name__}): el resultado es incierto; "
+                                         "compruébelo en Intune antes de repetir.", kind="network") from exc
                 if attempt > self.max_retries:
                     raise ConnectorError(f"Error de red con Graph tras {attempt} intentos: {type(exc).__name__}",
                                          kind="network") from exc
                 self.sleep(self._backoff(attempt, None))
                 continue
             if resp.status_code in (200, 201, 202, 204):
-                return resp.json() if resp.content else {}
+                if not resp.content.strip():
+                    return {}
+                try:
+                    return resp.json()
+                except ValueError:
+                    if idempotent:  # una lectura sin JSON no puede tomarse como «vacía»
+                        raise ConnectorError(f"Graph devolvió un cuerpo no válido en {_path(url)}.",
+                                             kind="error") from None
+                    return {}  # acción aceptada con un cuerpo que no es JSON
             if resp.status_code == 401 and not refreshed:
                 refreshed = True
                 self._token = None
@@ -138,7 +152,7 @@ class GraphClient:
                 raise ConnectorError(
                     f"Permisos insuficientes en Graph para {_path(url)} ({_safe_error_code(resp)}).", kind="permission"
                 )
-            if resp.status_code in RETRYABLE and attempt <= self.max_retries:
+            if idempotent and resp.status_code in RETRYABLE and attempt <= self.max_retries:
                 if resp.status_code == 429:
                     self.throttled_count += 1
                 self.sleep(self._backoff(attempt, resp.headers.get("Retry-After")))

@@ -34,6 +34,7 @@ class DeviceRecord:
     source_last_sync_at: datetime | None = None
     # Detalle de conformidad ({"policies": [...]}); None = no consultado (no borra lo guardado).
     compliance_details: dict | None = None
+    compliance_checked: bool = False  # True solo si el detalle se consultó ahora a la fuente
     raw: dict[str, Any] = field(default_factory=dict)
 
 

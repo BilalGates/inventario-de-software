@@ -29,8 +29,12 @@ Procedimiento recomendado (requiere coordinación; **no se ha ejecutado**):
 - **Secretos** solo en variables de entorno / `inventario.env` en ProgramData con ACL de
   Administradores y SYSTEM. La configuración de fuentes editable desde la UI rechaza claves no
   previstas. Los logs redactan *bearer tokens*, secretos y contraseñas.
-- **Graph**: permiso mínimo `DeviceManagementManagedDevices.Read.All`, TLS con verificación de
-  certificados (httpx por defecto), certificado preferible a secreto.
+- **Graph**: inventario con `DeviceManagementManagedDevices.Read.All`; opcionales
+  `DeviceManagementConfiguration.Read.All` (motivo de la no conformidad) y
+  `DeviceManagementManagedDevices.PrivilegedOperations.All` (solo sincronizar y Defender: lista
+  cerrada, rol técnico, auditadas, sin reintentos automáticos). La sesión delegada pide siempre
+  permisos explícitos, nunca `.default`. TLS con verificación de certificados (httpx por defecto),
+  certificado preferible a secreto.
 - **Auditoría**: cada cambio administrativo y cada ejecución generan un evento encadenado por
   hash; `GET /api/audit/verify` detecta manipulaciones. En MySQL, retire `UPDATE`/`DELETE` sobre
   `audit_events` al usuario de la aplicación.
@@ -46,3 +50,6 @@ Procedimiento recomendado (requiere coordinación; **no se ha ejecutado**):
   Aceptable para un equipo de uso exclusivo de IT; para uso compartido, use `entra`.
 - HTTPS no aplica a 127.0.0.1; es obligatorio si se expone en red.
 - Cifrado en reposo de la BD SQLite: depende de BitLocker en el equipo.
+- La sesión delegada de Intune usa el cliente público compartido "Graph Command Line Tools". Para
+  producción se recomienda un registro de aplicación propio con certificado (ver
+  `docs/integrations.md`, opción B).

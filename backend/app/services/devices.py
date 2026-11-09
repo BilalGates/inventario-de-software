@@ -221,8 +221,9 @@ def apply_record(
                                                detected_at=now))
         sources[fname] = {"source": source, "at": now.isoformat(timespec="seconds")}
     device.field_sources = sources
-    if rec.compliance_details is not None:
+    if rec.compliance_details is not None and rec.compliance_details != device.compliance_details:
         device.compliance_details = rec.compliance_details
+    if rec.compliance_checked:
         device.compliance_checked_at = now
     device.hostname_key = hostname_key(device.hostname)
     if device.device_type_id is None and rec.device_type:
