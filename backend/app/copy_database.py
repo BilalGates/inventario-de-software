@@ -46,7 +46,7 @@ def _counts(engine: Engine) -> dict[str, int]:
         return {t.name: c.execute(select(func.count()).select_from(t)).scalar() or 0 for t in Base.metadata.sorted_tables}
 
 
-def check(source: Engine, target: Engine, reset: bool = False) -> list[str]:
+def check(source: Engine, target: Engine, reset: bool = False, overwrite: bool = False) -> list[str]:
     """Problemas que impiden copiar. Lista vacía = se puede copiar.
 
     reset=True admite un destino con datos de prueba (p. ej. ejecuciones del worker sobre la base
@@ -61,11 +61,14 @@ def check(source: Engine, target: Engine, reset: bool = False) -> list[str]:
         busy = {k: v for k, v in _counts(target).items() if v}
         # La API crea datos de referencia al arrancar y una fila en «users» por cada inicio de sesión:
         # se aceptan (y se sustituyen por los del origen) solo si el destino no tiene nada más.
-        if reset:
+        if overwrite:
+            pass  # el usuario ha confirmado que el destino se sustituye entero
+        elif reset:
             real = {k: v for k, v in busy.items() if k in INVENTORY_TABLES}
             if real:
                 problems.append("El destino tiene inventario real y no se vaciará: "
-                                f"{', '.join(f'{k}={v}' for k, v in real.items())}.")
+                                f"{', '.join(f'{k}={v}' for k, v in real.items())}. "
+                                "Para sustituirlo igualmente por el origen, use --overwrite.")
         elif set(busy) - set(REPLACEABLE):
             problems.append(f"El destino ya tiene datos: {', '.join(f'{k}={v}' for k, v in busy.items())}. "
                             "Si son solo pruebas (p. ej. el worker ejecutado antes de copiar), use --reset.")
@@ -152,18 +155,28 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--check", action="store_true", help="Solo comprobar, sin escribir")
     parser.add_argument("--reset", action="store_true",
                         help="Vaciar antes el destino (solo si no tiene equipos, software ni inventarios mensuales)")
+    parser.add_argument("--overwrite", action="store_true",
+                        help="Vaciar el destino aunque tenga inventario (pide confirmación escribiendo SUSTITUIR)")
     args = parser.parse_args(argv)
     source, target = make_engine(args.source), make_engine(args.target)
     print("Comprobando…")
-    problems = check(source, target, reset=args.reset)
+    reset = args.reset or args.overwrite
+    problems = check(source, target, reset=reset, overwrite=args.overwrite)
     if problems:
         print("No se puede copiar:\n- " + "\n- ".join(problems))
         return 1
     if args.check:
         print("Todo correcto: se puede copiar.")
         return 0
-    print("Vaciando el destino y copiando…" if args.reset else "Copiando…")
-    copy(source, target, reset=args.reset)
+    if args.overwrite:
+        current = {k: v for k, v in _counts(target).items() if k in INVENTORY_TABLES and v}
+        print(f"Se BORRARÁ todo el destino ({', '.join(f'{k}={v}' for k, v in current.items()) or 'sin inventario'}) "
+              "y se sustituirá por el origen.")
+        if input("Escriba SUSTITUIR para continuar: ").strip() != "SUSTITUIR":
+            print("Cancelado: no se ha modificado nada.")
+            return 1
+    print("Vaciando el destino y copiando…" if reset else "Copiando…")
+    copy(source, target, reset=reset)
     print("Verificando…")
     problems = verify(source, target)
     if problems:

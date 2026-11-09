@@ -178,3 +178,25 @@ def test_copy_database_reset_clears_worker_leftovers_but_never_real_inventory(tm
         assert [e.action for e in db.execute(select(AuditEvent)).scalars()] == ["device.create"]
     # Con inventario real en el destino, --reset se niega.
     assert any("inventario real" in p for p in check(src, dst, reset=True))
+
+
+def test_copy_database_overwrite_replaces_real_inventory_after_confirmation(tmp_path, monkeypatch):
+    from app.copy_database import main
+
+    src, dst = _sqlite(tmp_path / "origen.db"), _sqlite(tmp_path / "destino.db")
+    with Session(src) as db:
+        db.add_all([Device(hostname="PC-01"), Device(hostname="PC-02")])
+        db.commit()
+    with Session(dst) as db:  # una sincronización hecha en la nube antes de copiar
+        db.add(Device(hostname="PC-NUBE"))
+        db.commit()
+    args = ["--source", f"sqlite:///{tmp_path / 'origen.db'}", "--target", f"sqlite:///{tmp_path / 'destino.db'}"]
+    assert check(src, dst, reset=True) and check(src, dst, reset=True, overwrite=True) == []
+    monkeypatch.setattr("builtins.input", lambda *_: "no")
+    assert main([*args, "--overwrite"]) == 1  # sin confirmar no toca nada
+    with Session(dst) as db:
+        assert [d.hostname for d in db.execute(select(Device)).scalars()] == ["PC-NUBE"]
+    monkeypatch.setattr("builtins.input", lambda *_: "SUSTITUIR")
+    assert main([*args, "--overwrite"]) == 0
+    with Session(dst) as db:
+        assert sorted(d.hostname for d in db.execute(select(Device)).scalars()) == ["PC-01", "PC-02"]
