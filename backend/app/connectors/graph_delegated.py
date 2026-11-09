@@ -159,14 +159,19 @@ class DeviceCodeLogin:
         else:
             self.pending_store.save(value)
 
-    def start(self) -> dict[str, Any]:
-        resp = self._post(f"{LOGIN}/organizations/oauth2/v2.0/devicecode", {"client_id": CLIENT_ID, "scope": SCOPE})
+    def start(self, full: bool = False) -> dict[str, Any]:
+        """full=False: solo lectura del inventario (no requiere aprobación de un administrador si ya está
+        concedida en el tenant). full=True: además conformidad y acciones remotas (suelen requerirla).
+        Si el inicio ampliado falla, la sesión anterior se conserva: solo se guarda al completarse."""
+        scope = SCOPE if full else READ_SCOPE
+        resp = self._post(f"{LOGIN}/organizations/oauth2/v2.0/devicecode", {"client_id": CLIENT_ID, "scope": scope})
         if resp.status_code != 200:
             raise ConnectorError(f"Entra ID rechazó el inicio de sesión ({_error_code(resp)}).", kind="auth")
         body = resp.json()
         with self._lock:
             self._pending = {"device_code": body["device_code"], "expires_at": time.time() + int(body["expires_in"]),
-                             "interval": int(body.get("interval", 5)), "next_poll": 0.0}
+                             "interval": int(body.get("interval", 5)), "next_poll": 0.0,
+                             "scopes": "full" if full else "read"}
         return {"user_code": body["user_code"], "verification_uri": body["verification_uri"],
                 "expires_in": int(body["expires_in"]), "interval": int(body.get("interval", 5))}
 
@@ -189,7 +194,8 @@ class DeviceCodeLogin:
         if resp.status_code == 200:
             body = resp.json()
             info = _account(body.get("id_token"))
-            self.store.save({"refresh_token": body["refresh_token"], **info, "connected_at": int(time.time())})
+            self.store.save({"refresh_token": body["refresh_token"], **info, "connected_at": int(time.time()),
+                             "scopes": pending.get("scopes", "read")})
             with self._lock:
                 self._pending = None
             return {"status": "connected", "account": info.get("account", "")}

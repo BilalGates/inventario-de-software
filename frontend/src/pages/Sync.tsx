@@ -100,7 +100,9 @@ function GraphConnection({ source }: { source: Source }) {
   const qc = useQueryClient();
   const [code, setCode] = useState<DeviceCodeStart | null>(null);
   const [confirmOff, setConfirmOff] = useState(false);
-  const connect = useAction(() => api.send<DeviceCodeStart>("POST", "/sources/intune/connect"), { onSuccess: setCode });
+  // full: pide además los permisos de conformidad y acciones remotas (requieren aprobación de un administrador).
+  const connect = useAction((full: boolean) =>
+    api.send<DeviceCodeStart>("POST", `/sources/intune/connect${full ? "?full=true" : ""}`), { onSuccess: setCode });
   const disconnect = useAction(() => api.send("DELETE", "/sources/intune/connect"), {
     success: "Sesión de Microsoft desconectada", invalidate: [["sources"]], onSuccess: () => setConfirmOff(false),
   });
@@ -122,16 +124,16 @@ function GraphConnection({ source }: { source: Source }) {
           <p className="mt-3 text-xs text-muted">Conectado como <span className="font-medium text-fg">{source.graph_account ?? "cuenta de Microsoft"}</span>
             {can.admin && <> · <button className="link" onClick={() => setConfirmOff(true)}>Desconectar</button></>}</p>
           {source.graph_read_only && (
-            <p className="mt-1.5 text-xs text-signal">Sesión con permisos de solo lectura: para ver el motivo de la no conformidad
-              y lanzar acciones remotas, desconecte y vuelva a conectar{can.admin && <> (<button className="link" disabled={connect.isPending}
-                onClick={() => connect.mutate(undefined)}>reconectar ahora</button>)</>}.</p>
+            <p className="mt-1.5 text-xs text-muted">Permisos: solo inventario. El motivo de la no conformidad y las acciones
+              remotas requieren permisos adicionales aprobados por un administrador del tenant{can.admin && <> · <button
+                className="link" disabled={connect.isPending} onClick={() => connect.mutate(true)}>Ampliar permisos</button></>}.</p>
           )}
           <p className="mt-1.5 text-xs text-muted">Sesión con el cliente público de Microsoft (Graph Command Line Tools). Para
             producción se recomienda un registro de aplicación propio: ver docs/integrations.md.</p>
         </>
       ) : can.admin && (
         <div className="mt-3"><Button size="sm" icon={<LogIn className="size-3.5" />} loading={connect.isPending}
-          onClick={() => connect.mutate(undefined)}>Conectar con Microsoft</Button></div>
+          onClick={() => connect.mutate(false)}>Conectar con Microsoft</Button></div>
       )}
       <Modal open={!!code} onClose={() => setCode(null)} title="Conectar con Microsoft"
         footer={<Button onClick={() => setCode(null)}>{st === "connected" ? "Cerrar" : "Cancelar"}</Button>}>

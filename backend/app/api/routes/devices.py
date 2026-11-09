@@ -277,8 +277,8 @@ def _intune_device(db: Session, device_id: int) -> tuple[Device, str]:
 
 def _graph_http_error(exc: ConnectorError, need: str) -> HTTPException:
     if exc.kind == "permission":
-        return HTTPException(403, f"Microsoft Graph no concede el permiso {need}. Vuelva a conectar Intune desde "
-                                  "Sincronización (puede requerir consentimiento de un administrador del tenant).")
+        return HTTPException(403, f"Microsoft Graph no concede el permiso {need}. Pida a un administrador del tenant que lo apruebe "
+                                  "y pulse «Ampliar permisos» en Sincronización.")
     if exc.kind in ("auth", "config"):
         return HTTPException(409, str(exc))
     return HTTPException(502, f"Intune no respondió correctamente: {exc}")

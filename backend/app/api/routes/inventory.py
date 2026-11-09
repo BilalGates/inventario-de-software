@@ -183,12 +183,13 @@ def _login() -> DeviceCodeLogin:
 
 
 @router.post("/sources/intune/connect")
-def intune_connect(_: CurrentUser = Admin):
-    """Inicia sesión con código de dispositivo: el usuario lo introduce en microsoft.com/devicelogin."""
+def intune_connect(full: bool = False, _: CurrentUser = Admin):
+    """Inicia sesión con código de dispositivo: el usuario lo introduce en microsoft.com/devicelogin.
+    full=true pide además los permisos de conformidad y acciones remotas (requieren aprobación)."""
     if get_settings().graph_app_configured:
         raise HTTPException(409, "Intune ya usa credenciales de aplicación (INV_GRAPH_*).")
     try:
-        return _login().start()
+        return _login().start(full=full)
     except ConnectorError as exc:
         raise HTTPException(502, str(exc)) from exc
 
