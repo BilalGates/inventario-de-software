@@ -4,12 +4,16 @@ Alternativa al registro de aplicación con secreto: el usuario inicia sesión un
 con su propia cuenta y el servicio guarda el refresh token para renovar el acceso solo.
 
 - Cliente público "Microsoft Graph Command Line Tools" (el mismo que usa el script PowerShell).
-- El refresh token se guarda cifrado con DPAPI (solo lo descifra el usuario de Windows que lo
-  guardó, en este equipo). Fuera de Windows (pruebas) se guarda con permisos 600.
+- Instalación de Windows: el refresh token se guarda en un fichero cifrado con DPAPI (solo lo
+  descifra el usuario de Windows que lo guardó, en este equipo).
+- Nube (Vercel + GitHub Actions): no hay disco ni DPAPI. Se guarda en la base de datos cifrado con
+  AES-GCM y la clave INV_TOKEN_ENCRYPTION_KEY, que solo conocen Vercel y GitHub. El inicio de sesión
+  pendiente también va a la base: cada petición puede atenderla una instancia distinta.
 - Nunca se registran tokens.
 """
 from __future__ import annotations
 
+import base64
 import json
 import os
 import sys
@@ -101,15 +105,98 @@ def _error_code(resp: httpx.Response) -> str:
         return str(resp.status_code)
 
 
+def decode_key(secret: str) -> bytes:
+    """Clave AES-256 en base64 (32 bytes). Genérela con: python -c "import os,base64;print(base64.b64encode(os.urandom(32)).decode())"."""
+    try:
+        key = base64.b64decode(secret.strip(), validate=True)
+    except ValueError:
+        key = b""
+    if len(key) != 32:
+        raise ValueError("INV_TOKEN_ENCRYPTION_KEY debe ser una clave de 32 bytes en base64.")
+    return key
+
+
+class EncryptedSettingStore:
+    """Mismo uso que TokenStore, pero en la tabla app_settings, cifrado con AES-GCM (para la nube)."""
+
+    def __init__(self, setting_key: str, secret: str):
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+        self.setting_key = setting_key
+        self.path = f"db:{setting_key}"  # identifica el almacén (como la ruta del fichero en TokenStore)
+        self._aes = AESGCM(decode_key(secret))
+
+    def _row(self, db):
+        from app.models import AppSetting
+
+        return db.get(AppSetting, self.setting_key)
+
+    def exists(self) -> bool:
+        return self.load() is not None
+
+    def load(self) -> dict[str, Any] | None:
+        from cryptography.exceptions import InvalidTag
+
+        from app.db import session_scope
+
+        with session_scope() as db:
+            row = self._row(db)
+            raw = row.value if row else None
+        if not isinstance(raw, dict):
+            return None
+        try:
+            data = self._aes.decrypt(base64.b64decode(raw["nonce"]), base64.b64decode(raw["data"]),
+                                     self.setting_key.encode())
+            return json.loads(data)
+        except (KeyError, ValueError, InvalidTag):
+            return None  # clave distinta o dato manipulado: como si no hubiera sesión
+
+    def save(self, data: dict[str, Any]) -> None:
+        from app.db import session_scope
+        from app.models import AppSetting
+
+        nonce = os.urandom(12)
+        sealed = self._aes.encrypt(nonce, json.dumps(data).encode(), self.setting_key.encode())
+        with session_scope() as db:
+            row = self._row(db) or AppSetting(key=self.setting_key)
+            row.value = {"v": 1, "nonce": base64.b64encode(nonce).decode(), "data": base64.b64encode(sealed).decode()}
+            row.updated_by = "system:graph"
+            db.add(row)
+
+    def delete(self) -> None:
+        from app.db import session_scope
+
+        with session_scope() as db:
+            row = self._row(db)
+            if row is not None:
+                db.delete(row)
+
+
 # --------------------------------------------------------------------------- inicio de sesión
 class DeviceCodeLogin:
-    """Flujo de código de dispositivo. Guarda en memoria el inicio de sesión pendiente (uno a la vez)."""
+    """Flujo de código de dispositivo (uno a la vez). El inicio de sesión pendiente se guarda en
+    memoria o, si se da pending_store, en ese almacén (necesario cuando cada petición la atiende
+    una instancia distinta, como en Vercel)."""
 
-    def __init__(self, store: TokenStore, http: httpx.Client | None = None):
+    def __init__(self, store: TokenStore, http: httpx.Client | None = None, pending_store: Any = None):
         self.store = store
+        self.pending_store = pending_store
         self.http = http or httpx.Client(timeout=httpx.Timeout(30.0, connect=15.0))
-        self._pending: dict[str, Any] | None = None
+        self._memory: dict[str, Any] | None = None
         self._lock = threading.Lock()
+
+    @property
+    def _pending(self) -> dict[str, Any] | None:
+        return self.pending_store.load() if self.pending_store is not None else self._memory
+
+    @_pending.setter
+    def _pending(self, value: dict[str, Any] | None) -> None:
+        if self.pending_store is None:
+            self._memory = value
+        elif value is None:
+            self.pending_store.delete()
+        else:
+            self.pending_store.save(value)
 
     def start(self) -> dict[str, Any]:
         resp = self._post(f"{LOGIN}/organizations/oauth2/v2.0/devicecode", {"client_id": CLIENT_ID, "scope": SCOPE})
@@ -134,6 +221,7 @@ class DeviceCodeLogin:
             if time.time() < pending["next_poll"]:
                 return {"status": "pending"}
             pending["next_poll"] = time.time() + pending["interval"]
+            self._pending = pending
         resp = self._post(f"{LOGIN}/organizations/oauth2/v2.0/token", {
             "grant_type": "urn:ietf:params:oauth:grant-type:device_code", "client_id": CLIENT_ID,
             "device_code": pending["device_code"]})
@@ -150,6 +238,7 @@ class DeviceCodeLogin:
         if code == "slow_down":
             with self._lock:
                 pending["interval"] += 5
+                self._pending = pending
             return {"status": "pending"}
         with self._lock:
             self._pending = None

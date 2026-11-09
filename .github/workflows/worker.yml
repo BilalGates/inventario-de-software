@@ -37,6 +37,9 @@ jobs:
       INV_AUTH_MODE: entra
       INV_ENTRA_TENANT_ID: ${{ vars.INV_ENTRA_TENANT_ID }}
       INV_ENTRA_API_CLIENT_ID: ${{ vars.INV_ENTRA_API_CLIENT_ID }}
+      # Sesión de Microsoft de Intune (iniciada desde la web), cifrada en la base con esta clave.
+      INV_TOKEN_ENCRYPTION_KEY: ${{ secrets.INV_TOKEN_ENCRYPTION_KEY }}
+      # Opcional: registro de aplicación de Graph (si existe, tiene prioridad sobre la sesión).
       INV_GRAPH_TENANT_ID: ${{ vars.INV_GRAPH_TENANT_ID }}
       INV_GRAPH_CLIENT_ID: ${{ vars.INV_GRAPH_CLIENT_ID }}
       INV_GRAPH_CLIENT_SECRET: ${{ secrets.INV_GRAPH_CLIENT_SECRET }}

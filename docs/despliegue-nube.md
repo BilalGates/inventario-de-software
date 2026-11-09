@@ -14,7 +14,7 @@ se hace y qué valor sale de él.
 | Worker | GitHub Actions, `.github/workflows/worker.yml` | Sincroniza Intune, procesa ficheros subidos, cierre mensual, alertas |
 | Disparador horario | Supabase `pg_cron` | Lanza el worker cada hora (el cron de GitHub queda de respaldo) |
 | Inicio de sesión | Microsoft Entra ID | Cuentas de Asserta con roles Admin, Técnico y Auditor |
-| Intune | Microsoft Graph, registro de aplicación | Lectura de equipos y aplicaciones detectadas |
+| Intune | Microsoft Graph, sesión de Microsoft iniciada desde la web | Lectura de equipos y aplicaciones detectadas |
 
 Cuando alguien pulsa **Sincronizar ahora**, sube un fichero o reintenta, la API encola la ejecución y
 lanza el workflow del worker en ese momento. El resultado aparece en 1–2 minutos (lo que tarda
@@ -23,8 +23,10 @@ GitHub en arrancar el trabajo).
 ### Qué cambia respecto a la instalación de Windows
 
 - **Inicio de sesión obligatorio** con Microsoft. Ya no existe el modo local sin login.
-- **Intune solo con registro de aplicación.** La «sesión de Microsoft desde la web» guardaba el token
-  cifrado con Windows (DPAPI) y no está disponible en la nube.
+- **Intune se conecta igual que en local**: *Sincronización › Microsoft Intune › Conectar*, con el
+  código de dispositivo y una cuenta con permiso de lectura en Intune (la misma aplicación pública de
+  Microsoft que usa `tools/Inventario_Programas_Intune.ps1`). La sesión ya no se guarda en un fichero
+  de Windows: va a la base de datos cifrada con `INV_TOKEN_ENCRYPTION_KEY`.
 - **Sin carpetas supervisadas.** Las exportaciones de Panda y los CSV del script de Intune se suben
   desde *Sincronización › Importar fichero*.
 - **Ficheros de hasta 4 MB** (límite de Vercel). Las exportaciones de Panda ocupan unos pocos KB.
@@ -90,16 +92,29 @@ de aplicaciones*. Necesitará el **ID de inquilino (tenant)**, que aparece en *I
 2. *Permisos de API* → *Agregar* → *Mis API* → `Asserta Inventario API` → permiso delegado
    `access_as_user`. Pulse **Conceder consentimiento de administrador**.
 
-## 3. Microsoft Graph: lectura de Intune
+## 3. Intune: clave para guardar la sesión de Microsoft
 
-1. *Nuevo registro* → `Asserta Inventario Intune`, solo este directorio, sin redirección. Anote el
-   **ID de aplicación** → `INV_GRAPH_CLIENT_ID`. El tenant es el mismo → `INV_GRAPH_TENANT_ID`.
-2. *Permisos de API* → *Microsoft Graph* → **Permisos de aplicación** →
-   `DeviceManagementManagedDevices.Read.All` (solo lectura; es el único necesario). Pulse
-   **Conceder consentimiento de administrador**.
-3. *Certificados y secretos* → *Nuevo secreto de cliente* (caducidad 12 o 24 meses). Copie el
-   **valor** (solo se muestra una vez) → `INV_GRAPH_CLIENT_SECRET`. Apunte en el calendario de IT
-   la fecha de caducidad: al caducar, la sincronización falla con una alerta crítica.
+Intune se conecta como en la instalación de Windows: con la **sesión de Microsoft iniciada desde la
+web** (código de dispositivo, cuenta con permiso de lectura en Intune). No hace falta ningún registro
+de aplicación. La web guarda la sesión cifrada en la base y el worker la usa para sincronizar.
+
+Genere una clave de cifrado (32 bytes en base64) en PowerShell:
+
+```powershell
+$b = New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); [Convert]::ToBase64String($b)
+```
+
+Guárdela en el gestor de contraseñas de IT: es `INV_TOKEN_ENCRYPTION_KEY` y debe ser **la misma** en
+GitHub (paso 4.2) y en Vercel (paso 6). Si se cambia, la sesión guardada deja de poder leerse y hay
+que volver a conectar.
+
+La conexión se hace después de copiar los datos (paso 5), desde *Sincronización › Microsoft Intune ›
+Conectar*: la copia sustituye la configuración de la base y borraría una sesión iniciada antes.
+
+> Alternativa: un registro de aplicación con permiso de **aplicación**
+> `DeviceManagementManagedDevices.Read.All` y su secreto en `INV_GRAPH_TENANT_ID`,
+> `INV_GRAPH_CLIENT_ID` e `INV_GRAPH_CLIENT_SECRET` (en GitHub y Vercel). Si está configurado, tiene
+> prioridad sobre la sesión de usuario.
 
 ## 4. GitHub: secretos, migraciones y worker
 
@@ -116,12 +131,10 @@ token con acceso **solo al repositorio `inventario-de-software`** y el permiso
 | Tipo | Nombre | Valor |
 |---|---|---|
 | Secret | `INV_DATABASE_URL_SESSION` | Cadena del *session pooler* (puerto 5432) |
-| Secret | `INV_GRAPH_CLIENT_SECRET` | Secreto del paso 3 |
+| Secret | `INV_TOKEN_ENCRYPTION_KEY` | Clave del paso 3 |
 | Secret | `INV_WORKER_DISPATCH_TOKEN` | Token del paso 4.1 |
 | Variable | `INV_ENTRA_TENANT_ID` | ID de inquilino |
 | Variable | `INV_ENTRA_API_CLIENT_ID` | ID de la API (paso 2.1) |
-| Variable | `INV_GRAPH_TENANT_ID` | ID de inquilino |
-| Variable | `INV_GRAPH_CLIENT_ID` | ID del registro de Intune (paso 3) |
 
 ### 4.3 Crear las tablas
 
@@ -140,7 +153,8 @@ cd C:\repositorios\inventario-de-software\backend
 .venv\Scripts\pip install -r requirements.txt            # instala el controlador de PostgreSQL
 $env:PGSSLMODE = "require"
 $origen  = "sqlite:///C:/Users/<usuario>/AppData/Local/InventarioAsserta/inventario.db"
-$destino = "<cadena del session pooler, puerto 5432>"
+# Ejecute esta línea SOLA y pegue la cadena cuando la pida (si se pega junto a otras, toma una línea vacía)
+$destino = Read-Host "Cadena del session pooler (puerto 5432)"
 .venv\Scripts\python -m app.copy_database --source $origen --target $destino --check
 .venv\Scripts\python -m app.copy_database --source $origen --target $destino
 ```
@@ -171,9 +185,7 @@ La ruta de la base local está en `%LOCALAPPDATA%\InventarioAsserta\inventario.e
    | `INV_ENTRA_TENANT_ID` | ID de inquilino |
    | `INV_ENTRA_API_CLIENT_ID` | ID de la API |
    | `INV_ENTRA_SPA_CLIENT_ID` | ID de la web |
-   | `INV_GRAPH_TENANT_ID` | ID de inquilino |
-   | `INV_GRAPH_CLIENT_ID` | ID del registro de Intune |
-   | `INV_GRAPH_CLIENT_SECRET` | Secreto de Intune |
+   | `INV_TOKEN_ENCRYPTION_KEY` | Clave del paso 3 (la misma que en GitHub) |
    | `INV_WORKER_INTERVAL_MINUTES` | `60` |
    | `INV_WORKER_DISPATCH_TOKEN` | Token del paso 4.1 |
    | `INV_WORKER_DISPATCH_REPO` | `BilalGates/inventario-de-software` |
@@ -183,12 +195,14 @@ La ruta de la base local está en `%LOCALAPPDATA%\InventarioAsserta\inventario.e
 
 La región de la función es Frankfurt (`fra1` en `vercel.json`), la misma zona que Supabase.
 
-## 7. Poner en marcha el worker
+## 7. Conectar Intune y poner en marcha el worker
 
-1. *Actions › Worker › Run workflow*. Debe terminar en verde.
-2. *Actions › Disparador del worker › Run workflow*. Instala en Supabase el trabajo `pg_cron` que lo
+1. En la web, *Sincronización › Microsoft Intune › Conectar*: abra microsoft.com/devicelogin, escriba
+   el código e inicie sesión con una cuenta con permiso de lectura en Intune (como en local).
+2. *Actions › Worker › Run workflow*. Debe terminar en verde.
+3. *Actions › Disparador del worker › Run workflow*. Instala en Supabase el trabajo `pg_cron` que lo
    lanza cada hora (minuto 5) y guarda el token en Supabase Vault.
-3. En la web, *Configuración › Programación mensual*: revise día y hora del cierre (en UTC).
+4. En la web, *Configuración › Programación mensual*: revise día y hora del cierre (en UTC).
 
 ## 8. Comprobaciones
 
@@ -215,6 +229,6 @@ pero ya no se mantiene.
 
 | Qué caduca | Dónde se renueva | Qué pasa si caduca |
 |---|---|---|
-| Secreto de Intune | Entra › registro de Intune › Certificados y secretos | Alerta crítica, no sincroniza |
+| Sesión de Microsoft de Intune | Se renueva sola en cada sincronización; caduca tras ~90 días sin usarse o si cambia la contraseña de la cuenta. Vuelva a *Conectar* | Alerta crítica, no sincroniza |
 | Token del worker | GitHub › Fine-grained tokens; actualice el secreto y Vercel y vuelva a lanzar *Disparador del worker* | La sincronización espera al cron de respaldo de GitHub |
 | Contraseña de la base | Supabase › Database › Reset password; actualice Vercel y GitHub | La web y el worker dejan de conectar |

@@ -52,6 +52,9 @@ class Settings(BaseSettings):
     # Alternativa sin registro de aplicación: sesión de usuario iniciada desde la web (código de
     # dispositivo). Fichero con el refresh token cifrado; vacío = %LOCALAPPDATA%\InventarioAsserta.
     graph_token_file: str = ""
+    # Nube: la sesión de Microsoft se guarda cifrada (AES-GCM) en la base con esta clave (32 bytes en
+    # base64). Debe ser la misma en Vercel y en GitHub Actions. Vacía = fichero local (Windows).
+    token_encryption_key: str = Field(default="", repr=False)
 
     # Carpeta supervisada para exportaciones de Panda (contingencia sin API)
     panda_drop_dir: str = ""
@@ -108,15 +111,6 @@ class Settings(BaseSettings):
             return None
         return Path(os.environ["LOCALAPPDATA"]) / "InventarioAsserta" / "graph_token.bin"
 
-    @property
-    def graph_delegated_connected(self) -> bool:
-        path = self.graph_token_path
-        return bool(path and path.is_file())
-
-    @property
-    def graph_configured(self) -> bool:
-        """Credenciales de aplicación (prioritarias) o sesión de usuario iniciada desde la web."""
-        return self.graph_app_configured or self.graph_delegated_connected
 
 
 # Configuración del servicio de Windows (fuera del repositorio, solo legible por administradores).

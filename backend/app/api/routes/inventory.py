@@ -17,7 +17,7 @@ from app.api.routes.devices import DEVICE_EXPORT_COLUMNS, device_export_rows, fr
 from app.api.software_report import NO_DEPARTMENT, Install, _header, _sheet_title, build_workbook
 from app.connectors.base import ConnectorError
 from app.connectors.files import decode
-from app.connectors.graph_delegated import DeviceCodeLogin, TokenStore
+from app.connectors.graph_delegated import DeviceCodeLogin
 from app.core.config import get_settings
 from app.core.security import Admin, CurrentUser, Reader, Technician
 from app.db import get_db, utcnow
@@ -38,7 +38,7 @@ from app.models import (
     SoftwareInstallation,
     SoftwareProduct,
 )
-from app.services import audit, snapshots
+from app.services import audit, graph_session, snapshots
 from app.services import runs as run_service
 from app.services.bootstrap import get_setting
 from app.services.dispatch import wake_worker
@@ -97,7 +97,7 @@ def start_sync(body: SyncIn, db: Session = Depends(get_db), user: CurrentUser = 
         raise not_found("Fuente")
     if src.kind != "api":
         raise HTTPException(422, f"{src.name} se alimenta con ficheros: use la subida de ficheros")
-    if src.code == "intune" and not get_settings().graph_configured:
+    if src.code == "intune" and not graph_session.configured():
         raise HTTPException(409, "El conector de Intune no tiene credenciales configuradas (ver docs/integrations.md)")
     run = run_service.enqueue(db, src.code, "manual", user.upn)
     db.commit()
@@ -154,7 +154,7 @@ def list_sources(db: Session = Depends(get_db), _: CurrentUser = Reader):
         devices_sw = db.execute(select(func.count(func.distinct(SoftwareInstallation.device_id)))
                                 .where(SoftwareInstallation.source == src.code,
                                        SoftwareInstallation.present.is_(True))).scalar() or 0
-        configured = s.graph_configured if src.code == "intune" else True
+        configured = graph_session.configured() if src.code == "intune" else True
         extra = _graph_status() if src.code == "intune" else {}
         out.append({**extra,"id": src.id, "code": src.code, "name": src.name, "kind": src.kind, "enabled": src.enabled,
                     "priority": src.priority, "config": src.config or {}, "configured": configured,
@@ -169,8 +169,8 @@ def _graph_status() -> dict:
     s = get_settings()
     if s.graph_app_configured:
         return {"graph_auth": "app", "graph_account": None}
-    if s.graph_delegated_connected:
-        saved = TokenStore(s.graph_token_path).load() or {}
+    saved = graph_session.saved_session()
+    if saved:
         return {"graph_auth": "delegated", "graph_account": saved.get("account") or None}
     return {"graph_auth": None, "graph_account": None}
 
@@ -180,12 +180,15 @@ _device_login: DeviceCodeLogin | None = None
 
 def _login() -> DeviceCodeLogin:
     global _device_login
-    path = get_settings().graph_token_path
-    if path is None:
-        raise HTTPException(409, "La sesión de Microsoft desde la web solo está disponible en la instalación "
-                                 "de Windows. En la nube, Intune usa el registro de aplicación (INV_GRAPH_*).")
-    if _device_login is None or _device_login.store.path != path:
-        _device_login = DeviceCodeLogin(TokenStore(path))
+    store = graph_session.token_store()
+    if store is None:
+        raise HTTPException(409, "No hay dónde guardar la sesión de Microsoft: configure INV_TOKEN_ENCRYPTION_KEY "
+                                 "(nube) o INV_GRAPH_TOKEN_FILE (Windows).")
+    pending = graph_session.pending_store()
+    if pending is not None:  # nube: el estado vive en la base, cada petición crea su objeto
+        return DeviceCodeLogin(store, pending_store=pending)
+    if _device_login is None or _device_login.store.path != store.path:
+        _device_login = DeviceCodeLogin(store)
     return _device_login
 
 
@@ -215,9 +218,9 @@ def intune_connect_status(db: Session = Depends(get_db), user: CurrentUser = Adm
 
 @router.delete("/sources/intune/connect")
 def intune_disconnect(db: Session = Depends(get_db), user: CurrentUser = Admin):
-    path = get_settings().graph_token_path
-    if path:
-        TokenStore(path).delete()
+    for store in (graph_session.token_store(), graph_session.pending_store()):
+        if store is not None:
+            store.delete()
     audit.record(db, user.upn, "source.disconnect", "inventory_source", None, "Microsoft Intune")
     db.commit()
     return {"ok": True}
@@ -261,7 +264,7 @@ def get_settings_api(db: Session = Depends(get_db), _: CurrentUser = Reader):
     hb = db.get(AppSetting, "worker.heartbeat")
     out["worker.heartbeat"] = hb.value if hb else None
     s = get_settings()
-    out["runtime"] = {"environment": s.environment, "auth_mode": s.auth_mode, "graph_configured": s.graph_configured,
+    out["runtime"] = {"environment": s.environment, "auth_mode": s.auth_mode, "graph_configured": graph_session.configured(),
                       "panda_drop_dir_configured": bool(s.panda_drop_dir), "stale_device_days": s.stale_device_days}
     return out
 
