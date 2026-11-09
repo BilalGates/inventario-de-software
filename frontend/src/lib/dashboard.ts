@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "./api";
-import type { Alert, Change, Coverage, Run, Snapshot } from "./types";
+import type { Alert, Coverage, Run, Snapshot } from "./types";
 
 export interface DayActivity { date: string; installed: number; removed: number; updated: number }
 export interface WeekActivity { week_start: string; installed: number; removed: number; updated: number }
@@ -18,8 +18,6 @@ export interface DashboardData {
   alerts: { open: number; by_severity: Record<string, number>; top: Alert[]; resolved_30d?: number };
   monthly: { period: string; snapshot: Snapshot | null; coverage: Coverage };
   runs: Run[];
-  changes: Change[];
-  changes_30d: Record<string, number>;
   changes_daily?: DayActivity[];
   changes_weekly?: WeekActivity[];
   departments: { name: string; devices: number }[];

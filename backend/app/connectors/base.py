@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Protocol
+from typing import Any
 
 
 @dataclass
@@ -70,9 +70,3 @@ class ConnectorError(Exception):
     def __init__(self, message: str, kind: str = "error"):
         super().__init__(message)
         self.kind = kind  # auth | permission | throttled | network | data | config
-
-
-class Connector(Protocol):
-    source_code: str
-
-    def extract(self, params: dict[str, Any], log) -> ExtractResult: ...

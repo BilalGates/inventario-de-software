@@ -152,11 +152,6 @@ def _department_workbook(db: Session, user, products: list[SoftwareProduct], dep
                              headers={"Content-Disposition": f'attachment; filename="software_por_departamento_{utcnow():%Y%m%d}.xlsx"'})
 
 
-@router.get("/meta")
-def software_meta(_: CurrentUser = Reader):
-    return {"statuses": list(AUTH_STATUSES), "categories": list(SOFTWARE_CATEGORIES)}
-
-
 @router.get("/{product_id}")
 def product_detail(product_id: int, db: Session = Depends(get_db), _: CurrentUser = Reader):
     p = db.get(SoftwareProduct, product_id)

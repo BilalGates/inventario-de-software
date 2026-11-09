@@ -12,10 +12,6 @@ def normalize_nombre(nombre: str) -> str:
     return re.sub(r"\s+", " ", val)
 
 
-def normalize_equipo_nombre(nombre: str) -> str:
-    return normalize_nombre(nombre)
-
-
 def clean_version(raw: Any) -> str | None:
     if raw is None:
         return None
