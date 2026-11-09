@@ -105,6 +105,14 @@ class GraphClient:
 
     # -- peticiones --------------------------------------------------------------------
     def get(self, path_or_url: str, params: dict[str, Any] | None = None) -> dict:
+        return self._request("GET", path_or_url, params=params)
+
+    def post(self, path_or_url: str, json: dict[str, Any] | None = None) -> dict:
+        """Acciones de Graph (p. ej. syncDevice). Suelen responder 204 sin cuerpo: devuelve {}."""
+        return self._request("POST", path_or_url, json=json)
+
+    def _request(self, method: str, path_or_url: str, params: dict[str, Any] | None = None,
+                 json: dict[str, Any] | None = None) -> dict:
         url = path_or_url if path_or_url.startswith("http") else f"{self.base_url}{path_or_url}"
         refreshed = False
         attempt = 0
@@ -113,15 +121,15 @@ class GraphClient:
             headers = {"Authorization": f"Bearer {self._get_token()}", "ConsistencyLevel": "eventual"}
             try:
                 self.request_count += 1
-                resp = self.http.get(url, params=params, headers=headers)
+                resp = self.http.request(method, url, params=params, headers=headers, json=json)
             except httpx.HTTPError as exc:
                 if attempt > self.max_retries:
                     raise ConnectorError(f"Error de red con Graph tras {attempt} intentos: {type(exc).__name__}",
                                          kind="network") from exc
                 self.sleep(self._backoff(attempt, None))
                 continue
-            if resp.status_code == 200:
-                return resp.json()
+            if resp.status_code in (200, 201, 202, 204):
+                return resp.json() if resp.content else {}
             if resp.status_code == 401 and not refreshed:
                 refreshed = True
                 self._token = None

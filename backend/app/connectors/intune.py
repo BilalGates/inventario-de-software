@@ -25,6 +25,7 @@ from typing import Any
 
 from app.connectors.base import ConnectorError, DeviceRecord, ExtractResult, InstallRecord
 from app.connectors.graph import GraphClient
+from app.connectors.intune_compliance import DEVICE_FAILING, fetch_compliance
 
 DEVICE_FIELDS = [
     "id", "deviceName", "azureADDeviceId", "serialNumber", "manufacturer", "model", "operatingSystem",
@@ -124,6 +125,8 @@ class IntuneConnector:
 
         if params.get("fetch_hardware_details", True):
             self._hardware_details(result, log)
+        if params.get("fetch_compliance_details", True):
+            self._compliance_details(result, log)
 
         # 2. Software.
         device_keys = {d.key for d in result.devices}
@@ -158,6 +161,31 @@ class IntuneConnector:
         if failures:
             result.warnings.append(f"No se pudo leer la RAM de {failures} dispositivos.")
             log(result.warnings[-1])
+
+    def _compliance_details(self, result: ExtractResult, log) -> None:
+        """Motivo de la no conformidad, solo en los equipos que fallan (pocas llamadas). No es esencial:
+        sin el permiso DeviceManagementConfiguration.Read.All se avisa y se sigue."""
+        failing = [d for d in result.devices if (d.compliance_state or "").lower() in DEVICE_FAILING]
+        for dev in result.devices:
+            if (dev.compliance_state or "").lower() == "compliant":
+                dev.compliance_details = {"policies": []}  # conforme: se limpia el motivo anterior
+        failures = 0
+        for dev in failing:
+            try:
+                dev.compliance_details = fetch_compliance(self.client, dev.key, self.api.strip("/"))
+            except ConnectorError as exc:
+                if exc.kind == "permission":
+                    result.warnings.append("Sin permiso para leer el detalle de conformidad "
+                                           "(DeviceManagementConfiguration.Read.All); vuelva a conectar Intune.")
+                    log(result.warnings[-1])
+                    return
+                if exc.kind == "auth":
+                    raise
+                failures += 1
+        if failing:
+            log(f"Intune: detalle de conformidad de {len(failing) - failures}/{len(failing)} equipos no conformes.")
+        if failures:
+            result.warnings.append(f"No se pudo leer el detalle de conformidad de {failures} dispositivos.")
 
     def _software_per_app(self, result: ExtractResult, device_keys: set[str], log) -> None:
         apps = list(self.client.paginate(f"{self.api}/deviceManagement/detectedApps", {"$top": "500"}))

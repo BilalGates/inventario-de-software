@@ -40,6 +40,9 @@ class FakeGraph:
         self.page_size = page_size
         self.fail: Callable[[httpx.Request], httpx.Response | None] = lambda req: None
         self.calls: list[str] = []
+        # intune id -> estados de directivas (deviceCompliancePolicyStates) y beta (si v1.0 no detalla)
+        self.compliance: dict[str, list[dict]] = {}
+        self.compliance_beta: dict[str, list[dict]] = {}
 
     def _page(self, items: list[dict], request: httpx.Request) -> httpx.Response:
         skip = int(request.url.params.get("$skiptoken", "0"))
@@ -56,7 +59,13 @@ class FakeGraph:
             return httpx.Response(200, json={"access_token": "tok", "expires_in": 3600})
         if (injected := self.fail(request)) is not None:
             return injected
+        beta = request.url.path.startswith("/beta")
         path = request.url.path.removeprefix("/v1.0").removeprefix("/beta")
+        if path.endswith("/deviceCompliancePolicyStates"):
+            dev_id = path.split("/")[3]
+            return self._page((self.compliance_beta if beta else self.compliance).get(dev_id, []), request)
+        if request.method == "POST" and path.startswith("/deviceManagement/managedDevices/"):
+            return httpx.Response(204)  # acciones remotas (syncDevice, Defender...)
         if path == "/deviceManagement/managedDevices":
             return self._page(self.devices, request)
         if path.startswith("/deviceManagement/managedDevices/") and path.count("/") == 3:
@@ -69,7 +78,9 @@ class FakeGraph:
                 if apps:
                     apps.append({"id": "pkg-sistema", "displayName": "Microsoft.WindowsStore", "publisher": None})
                 return httpx.Response(200, json={"id": dev_id, "detectedApps": apps})
-            return httpx.Response(200, json={"id": dev_id, "physicalMemoryInBytes": 16 * 1024**3})
+            dev = next((d for d in self.devices if d["id"] == dev_id), {})
+            return httpx.Response(200, json={"id": dev_id, "physicalMemoryInBytes": 16 * 1024**3,
+                                             "complianceState": dev.get("complianceState")})
         if path == "/deviceManagement/detectedApps":
             return self._page(self.apps, request)
         if path.startswith("/deviceManagement/detectedApps/") and path.endswith("/managedDevices"):
@@ -84,6 +95,12 @@ class FakeGraph:
     def client(self) -> GraphClient:
         http = httpx.Client(transport=httpx.MockTransport(self.handler))
         return GraphClient("tenant", "client", "secret", http=http, sleep=lambda s: None, max_retries=3)
+
+
+def policy(name: str, state: str, *settings: tuple[str, str]) -> dict:
+    """Estado de directiva con ajustes (setting, state), como deviceCompliancePolicyState."""
+    return {"id": f"pol-{name}", "displayName": name, "state": state,
+            "settingStates": [{"setting": s, "settingName": s.rsplit(".", 1)[-1], "state": st} for s, st in settings]}
 
 
 def dumps(o) -> str:

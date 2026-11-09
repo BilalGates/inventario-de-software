@@ -32,6 +32,8 @@ class DeviceRecord:
     ownership: str | None = None
     enrolled_at: datetime | None = None
     source_last_sync_at: datetime | None = None
+    # Detalle de conformidad ({"policies": [...]}); None = no consultado (no borra lo guardado).
+    compliance_details: dict | None = None
     raw: dict[str, Any] = field(default_factory=dict)
 
 

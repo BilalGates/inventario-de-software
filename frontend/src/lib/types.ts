@@ -35,6 +35,7 @@ export interface DeviceRow {
   primary_user_upn: string | null;
   location: string | null;
   compliance_state: string | null;
+  compliance_reasons?: string[];
   encrypted: boolean | null;
   ram_bytes: number | null;
   storage_total_bytes: number | null;
@@ -62,6 +63,26 @@ export interface DeviceDetail extends DeviceRow {
   updated_at: string;
   field_sources: Record<string, { source: string; at: string; by?: string }>;
   external_ids: { source: string; type: string; value: string; first_seen_at: string; last_seen_at: string }[];
+  intune_device_id: string | null;
+}
+
+export type IntuneAction = "sync" | "defender_signatures" | "defender_scan";
+
+export interface ComplianceSetting {
+  setting: string | null;
+  label: string;
+  hint: string | null;
+  action: IntuneAction | null;
+  state: string;
+  error: string | null;
+}
+
+export interface DeviceCompliance {
+  compliance_state: string | null;
+  checked_at: string | null;
+  intune_device_id: string | null;
+  policies: { name: string; state: string; settings: ComplianceSetting[] }[];
+  actions: { code: IntuneAction; label: string }[];
 }
 
 export type AuthStatus = "authorized" | "unauthorized" | "pending_review" | "exception" | "unclassified";

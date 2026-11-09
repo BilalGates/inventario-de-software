@@ -44,6 +44,13 @@ Rama: `feature/inventario-2.0`. Última actualización: 2026-10-15.
 | Remediar la exposición histórica | Rotar la contraseña de MySQL `root`; decidir sobre limpieza del historial |
 | Entra ID multiusuario | Solo si se decide abrir el acceso a más personas |
 
+## Conformidad de Intune (2026-11-09)
+
+- Motivo del «No conforme» (directiva y ajuste que fallan, con pista de corrección) en la tabla de
+  Dispositivos y en la ficha del equipo; se guarda en `devices.compliance_details`.
+- Acciones remotas desde la ficha: sincronizar equipo, actualizar firmas y análisis rápido de Defender.
+- Requiere volver a conectar Intune para conceder los permisos nuevos (ver `docs/integrations.md`).
+
 ## Pendiente (siguiente iteración)
 
 - Mejoras: vista de versiones desplegadas por producto en el panel, informes programados por correo, P2 (licencias, garantías, Jira Assets).
