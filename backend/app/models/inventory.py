@@ -16,8 +16,6 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import JSON, Base, utcnow
 
-RUN_STATUSES = ("queued", "running", "succeeded", "partial", "failed", "cancelled")
-
 
 class InventorySource(Base):
     __tablename__ = "inventory_sources"

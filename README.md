@@ -6,25 +6,12 @@ autorizaciones e inventarios mensuales de Asserta Global Healthcare Solutions.
 Es una **aplicación web** que recoge datos de Microsoft Intune (Microsoft Graph) y de Panda
 Adaptive Defense (exportaciones), los normaliza, detecta cambios y genera evidencias de auditoría.
 
-## Despliegue en la nube (Vercel + Supabase)
+## Despliegue (Vercel + Supabase)
 
 La interfaz y la API se publican en **Vercel**, los datos viven en **Supabase** (PostgreSQL, UE) y el
 worker de sincronización corre en **GitHub Actions**, lanzado cada hora por `pg_cron` y al momento
-desde la web. Inicio de sesión con Microsoft Entra ID y roles. Guía paso a paso, incluida la copia
-de los datos de la instalación de Windows: [docs/despliegue-nube.md](docs/despliegue-nube.md).
-
-## Instalación local en Windows (histórico, ya no se mantiene)
-
-Arranca sola en segundo plano y se usa en **http://127.0.0.1:8180**.
-Requisitos: Windows 10/11, Python 3.11+ y Node.js 20+ (solo para compilar la interfaz).
-No necesita permisos de administrador.
-
-```powershell
-powershell -ExecutionPolicy Bypass -File deploy\windows\install-autostart.ps1
-```
-
-Arranca al iniciar sesión, sin ventana, y se reinicia sola si cae. Datos y configuración en
-`%LOCALAPPDATA%\InventarioAsserta`. Detalles: [docs/deployment.md](docs/deployment.md).
+desde la web. Inicio de sesión con Microsoft Entra ID y roles. Guía paso a paso:
+[docs/despliegue-nube.md](docs/despliegue-nube.md).
 
 ## Desarrollo
 
@@ -42,9 +29,11 @@ Pruebas: `backend> .venv\Scripts\pytest` · `frontend> npm test` · `frontend> n
 
 | Carpeta | Contenido |
 |---|---|
-| `backend/` | API FastAPI, modelo SQLAlchemy, migraciones Alembic, conectores, motor de sincronización, worker y servicio de Windows |
+| `backend/` | API FastAPI, modelo SQLAlchemy, migraciones Alembic, conectores, motor de sincronización y worker |
 | `frontend/` | Interfaz web (React + TypeScript + Tailwind) |
-| `deploy/windows/` | Instalación, desinstalación y copias de seguridad del servicio |
+| `api/` | Función de Vercel que expone la API de `backend/` |
+| `infra/supabase/` | SQL del disparador horario del worker (`pg_cron`) |
+| `tools/` | Script PowerShell de contingencia: CSV de Intune para subir desde la web |
 | `docs/` | Documentación (abajo) |
 
 ## Documentación
@@ -54,7 +43,7 @@ Pruebas: `backend> .venv\Scripts\pytest` · `frontend> npm test` · `frontend> n
 | Arquitectura | [docs/architecture.md](docs/architecture.md) |
 | Modelo de datos | [docs/data-model.md](docs/data-model.md) |
 | Integraciones (Intune, Panda) | [docs/integrations.md](docs/integrations.md) |
-| Instalación y operación | [docs/deployment.md](docs/deployment.md) |
+| Despliegue y operación | [docs/despliegue-nube.md](docs/despliegue-nube.md) |
 | Seguridad | [docs/security.md](docs/security.md) |
 | Migración desde la versión de escritorio | [docs/migration.md](docs/migration.md) |
 | Decisiones de arquitectura | [docs/decisions.md](docs/decisions.md) |
@@ -63,6 +52,6 @@ Pruebas: `backend> .venv\Scripts\pytest` · `frontend> npm test` · `frontend> n
 
 ## Datos y seguridad
 
-No suba datos reales ni credenciales al repositorio (es público). La configuración y la base
-de datos del servicio viven en `C:\ProgramData\InventarioAsserta`, fuera del repositorio.
+No suba datos reales ni credenciales al repositorio. La configuración vive en las variables de
+entorno de Vercel y GitHub, y los datos en Supabase.
 Ver [docs/security.md](docs/security.md), que incluye una exposición histórica pendiente de remediar.

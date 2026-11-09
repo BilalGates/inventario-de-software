@@ -9,7 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.common import export_response, not_found
-from app.core.security import Admin, CurrentUser, Reader, Technician
+from app.core.security import CurrentUser, Reader, Technician
 from app.db import get_db, utcnow
 from app.models import (
     AuditEvent,
@@ -240,13 +240,3 @@ def update_user(user_id: int, body: UserPatch, db: Session = Depends(get_db), ac
 def me(user: CurrentUser = Reader):
     return {"upn": user.upn, "name": user.name, "role": user.role,
             "permissions": {"read": True, "write": user.can("technician"), "admin": user.can("admin")}}
-
-
-@router.get("/admin/roles")
-def roles_info(_: CurrentUser = Admin):
-    """Los roles se asignan en Entra ID (app roles), no en esta aplicación."""
-    from app.core.config import get_settings
-
-    s = get_settings()
-    return {"mode": s.auth_mode, "mapping": {"admin": s.entra_role_admin, "technician": s.entra_role_technician,
-                                             "auditor": s.entra_role_auditor}}

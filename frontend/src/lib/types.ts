@@ -172,7 +172,6 @@ export interface Source {
   last_run: Run | null;
   devices: number;
   devices_with_software: number;
-  watch_folder: boolean | null;
   /** Solo Intune: "app" (credenciales INV_GRAPH_*), "delegated" (sesión iniciada desde la web) o null. */
   graph_auth?: "app" | "delegated" | null;
   graph_account?: string | null;

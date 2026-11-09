@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.api.common import Page, export_response, not_found, paginate
 from app.core.config import get_settings
-from app.core.security import Admin, CurrentUser, Reader, Technician
+from app.core.security import CurrentUser, Reader, Technician
 from app.db import get_db, utcnow
 from app.models import (
     AuditEvent,
@@ -19,14 +19,11 @@ from app.models import (
     DeviceExternalId,
     DeviceType,
     InventoryChange,
-    InventoryObservation,
-    InventoryRun,
     SoftwareInstallation,
     SoftwareProduct,
     SoftwareVersion,
     User,
 )
-from app.models.devices import DEVICE_STATUSES
 from app.services import audit
 from app.services.devices import reassign, upsert_user
 from app.services.normalization import hostname_key
@@ -402,27 +399,6 @@ def device_history(device_id: int, limit: int = Query(200, le=1000), db: Session
     }
 
 
-@router.get("/{device_id}/observations")
-def device_observations(device_id: int, db: Session = Depends(get_db), _: CurrentUser = Admin):
-    """Último dato original recibido de cada fuente (diagnóstico)."""
-    keys = db.execute(select(DeviceExternalId.value).where(DeviceExternalId.device_id == device_id,
-                                                           DeviceExternalId.id_type == "intune_device_id")).scalars().all()
-    obs = []
-    for key in keys:
-        row = db.execute(select(InventoryObservation, InventoryRun.trigger)
-                         .join(InventoryRun, InventoryRun.id == InventoryObservation.run_id)
-                         .where(InventoryObservation.entity == "device", InventoryObservation.external_key == key)
-                         .order_by(InventoryObservation.id.desc()).limit(1)).first()
-        if row:
-            obs.append({"run_id": row[0].run_id, "observed_at": row[0].observed_at, "payload": row[0].payload})
-    return obs
-
-
 @router.get("/meta/types")
 def device_types(db: Session = Depends(get_db), _: CurrentUser = Reader):
     return [{"id": t.id, "code": t.code, "name": t.name} for t in db.execute(select(DeviceType).order_by(DeviceType.id)).scalars()]
-
-
-@router.get("/meta/statuses")
-def device_statuses(_: CurrentUser = Reader):
-    return list(DEVICE_STATUSES)

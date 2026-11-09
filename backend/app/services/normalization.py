@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 import unicodedata
 
-from app.legacy import clean_version
+from app.parsers.normalizer import clean_version
 
 _TM = re.compile(r"[®™©]")
 _WS = re.compile(r"\s+")

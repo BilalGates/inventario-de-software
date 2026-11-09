@@ -6,24 +6,20 @@
 En cada pasada:
 1. Recupera ejecuciones colgadas.
 2. Programación mensual: si toca y no se ha lanzado este mes, encola las fuentes API.
-3. Carpeta supervisada de Panda: encola cada fichero nuevo y lo mueve a processed/ o failed/.
-4. Procesa la cola de ejecuciones.
-5. Cuando las ejecuciones programadas del mes terminan, genera el BORRADOR del inventario
+3. Procesa la cola de ejecuciones (sincronizaciones y ficheros subidos desde la web).
+4. Cuando las ejecuciones programadas del mes terminan, genera el BORRADOR del inventario
    mensual (la aprobación la hace IT desde la aplicación).
-6. Alertas de fuentes sin sincronización reciente.
+5. Alertas de fuentes sin sincronización reciente.
 """
 from __future__ import annotations
 
 import argparse
 import logging
-import shutil
 import signal
 import time
-from pathlib import Path
 
 from sqlalchemy import select
 
-from app.connectors.files import decode, hostname_from_filename
 from app.core.config import get_settings
 from app.core.logging import setup_logging
 from app.db import session_scope, utcnow
@@ -81,47 +77,9 @@ def maybe_generate_monthly_snapshot(db, now=None) -> InventorySnapshot | None:
     return snap
 
 
-def scan_drop_dir(db, drop_dir: str) -> int:
-    base = Path(drop_dir)
-    if not drop_dir or not base.is_dir():
-        return 0
-    (base / "processed").mkdir(exist_ok=True)
-    (base / "failed").mkdir(exist_ok=True)
-    count = 0
-    csvs = [p for p in sorted(base.glob("*.csv")) if not p.name.startswith("Errores_Inventario_Intune_")]
-    for path in sorted(base.glob("*.txt")) + csvs:
-        try:
-            content = decode(path.read_bytes())
-            if path.suffix.lower() == ".txt":
-                if not hostname_from_filename(path.name):
-                    raise ValueError("nombre de fichero sin hostname")
-                run_service.enqueue(db, "panda", "watcher", "system:watcher",
-                                    {"content": content, "filename": path.name})
-            else:
-                # Salida de Inventario_Programas_Intune.ps1: es completa si el script no dejó
-                # su fichero de errores con la misma marca de tiempo.
-                stamp = path.stem.removeprefix("Inventario_Programas_Intune_")
-                is_script = stamp != path.stem
-                errors = base / f"Errores_Inventario_Intune_{stamp}.csv"
-                run_service.enqueue(db, "intune", "watcher", "system:watcher",
-                                    {"content": content, "filename": path.name, "kind": "apps" if is_script else None,
-                                     "declared_complete": is_script and not errors.exists()})
-                if is_script and errors.exists():
-                    shutil.move(str(errors), str(base / "processed" / f"{utcnow():%Y%m%d%H%M%S}_{errors.name}"))
-            db.commit()
-            target = base / "processed" / f"{utcnow():%Y%m%d%H%M%S}_{path.name}"
-            count += 1
-        except Exception as exc:  # noqa: BLE001
-            db.rollback()
-            log.warning("Fichero %s rechazado: %s", path.name, exc)
-            target = base / "failed" / path.name
-        shutil.move(str(path), str(target))
-    return count
-
-
 def tick(settings=None) -> dict:
     settings = settings or get_settings()
-    summary = {"enqueued": 0, "executed": 0, "files": 0, "snapshot": None}
+    summary = {"enqueued": 0, "executed": 0, "snapshot": None}
     with session_scope() as db:
         ensure_reference_data(db)
         run_service.recover_stuck(db)
@@ -129,9 +87,6 @@ def tick(settings=None) -> dict:
             run_service.enqueue(db, code, "schedule", "system:scheduler")
             summary["enqueued"] += 1
         db.commit()
-        summary["files"] = scan_drop_dir(db, settings.panda_drop_dir)
-        if settings.intune_drop_dir:
-            summary["files"] += scan_drop_dir(db, settings.intune_drop_dir)
     while not _stop:
         with session_scope() as db:
             run = run_service.claim_next(db)

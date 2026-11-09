@@ -1,32 +1,27 @@
 """Dónde vive la sesión de Microsoft (código de dispositivo) que usa el conector de Intune.
 
-- Nube (INV_TOKEN_ENCRYPTION_KEY definida): en la base de datos, cifrada con AES-GCM. La web
-  (Vercel) inicia la sesión y el worker (GitHub Actions) la usa y guarda el token renovado.
-- Windows: fichero cifrado con DPAPI en %LOCALAPPDATA%\\InventarioAsserta (como hasta ahora).
-- Sin ninguna de las dos: no hay sesión posible; queda el registro de aplicación (INV_GRAPH_*).
+En la base de datos, cifrada con AES-GCM y la clave INV_TOKEN_ENCRYPTION_KEY: la web (Vercel) inicia
+la sesión y el worker (GitHub Actions) la usa y guarda el token renovado. Sin clave no hay sesión
+posible; queda el registro de aplicación (INV_GRAPH_*).
 """
 from __future__ import annotations
 
 from typing import Any
 
-from app.connectors.graph_delegated import EncryptedSettingStore, TokenStore
+from app.connectors.graph_delegated import EncryptedSettingStore
 from app.core.config import get_settings
 
 TOKEN_KEY = "secret.graph.session"
 PENDING_KEY = "secret.graph.device_login"
 
 
-def token_store() -> EncryptedSettingStore | TokenStore | None:
+def token_store() -> EncryptedSettingStore | None:
     s = get_settings()
-    if s.token_encryption_key:
-        return EncryptedSettingStore(TOKEN_KEY, s.token_encryption_key)
-    if s.graph_token_path:
-        return TokenStore(s.graph_token_path)
-    return None
+    return EncryptedSettingStore(TOKEN_KEY, s.token_encryption_key) if s.token_encryption_key else None
 
 
 def pending_store() -> EncryptedSettingStore | None:
-    """Inicio de sesión pendiente compartido entre instancias (solo en la nube)."""
+    """Inicio de sesión pendiente, compartido entre instancias de Vercel."""
     s = get_settings()
     return EncryptedSettingStore(PENDING_KEY, s.token_encryption_key) if s.token_encryption_key else None
 

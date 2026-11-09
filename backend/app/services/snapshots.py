@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -147,7 +146,3 @@ def previous_snapshot(db: Session, snap: InventorySnapshot) -> InventorySnapshot
     return db.execute(select(InventorySnapshot).where(
         InventorySnapshot.period < snap.period, InventorySnapshot.status == "approved"
     ).order_by(InventorySnapshot.period.desc(), InventorySnapshot.version.desc()).limit(1)).scalar_one_or_none()
-
-
-def period_of(dt: datetime) -> str:
-    return dt.strftime("%Y-%m")

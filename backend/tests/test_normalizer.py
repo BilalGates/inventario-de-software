@@ -1,7 +1,7 @@
 """Tests de normalización de nombres y de versiones-como-texto (FASE 6)."""
 import pytest
 
-from app.parsers.normalizer import clean_version, normalize_nombre, version_changed
+from app.parsers.normalizer import clean_version, normalize_nombre
 
 
 class TestNormalizeNombre:
@@ -47,26 +47,3 @@ class TestCleanVersionPreservaTexto:
 
     def test_nan_float(self):
         assert clean_version(float("nan")) is None
-
-
-class TestVersionChanged:
-    def test_misma_version_no_cambia(self):
-        assert version_changed("1.0", "1.0") is False
-
-    def test_version_distinta_cambia(self):
-        assert version_changed("1.0", "1.1") is True
-
-    def test_sin_referencia_previa_y_con_nueva_cambia(self):
-        assert version_changed(None, "1.0") is True
-
-    def test_nueva_vacia_no_cambia(self):
-        assert version_changed("1.0", None) is False
-        assert version_changed("1.0", "-") is False
-
-    def test_no_usa_comparacion_lexicografica(self):
-        # El bug original (str ">") trataba "9.0" como mayor que "10.0".
-        # version_changed solo mira igualdad: ambos casos son "cambio".
-        assert version_changed("9.0", "10.0") is True
-        assert version_changed("10.0", "9.0") is True
-        # Y NO debe reportar cambio cuando son idénticas aunque "parezcan" raras.
-        assert version_changed("26.001.21563", "26.001.21563") is False

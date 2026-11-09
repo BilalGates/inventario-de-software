@@ -142,7 +142,6 @@ def retry_run(run_id: int, db: Session = Depends(get_db), user: CurrentUser = Te
 # --------------------------------------------------------------------------- fuentes
 @router.get("/sources")
 def list_sources(db: Session = Depends(get_db), _: CurrentUser = Reader):
-    s = get_settings()
     out = []
     for src in db.execute(select(InventorySource).order_by(InventorySource.priority)).scalars():
         last = db.execute(select(InventoryRun).where(InventoryRun.source_id == src.id)
@@ -160,8 +159,7 @@ def list_sources(db: Session = Depends(get_db), _: CurrentUser = Reader):
                     "priority": src.priority, "config": src.config or {}, "configured": configured,
                     "last_success_at": src.last_success_at, "last_error": src.last_error,
                     "last_run": _run(last) if last else None, "devices": devices,
-                    "devices_with_software": devices_sw,
-                    "watch_folder": bool(s.panda_drop_dir) if src.code == "panda" else None})
+                    "devices_with_software": devices_sw})
     return out
 
 
@@ -175,21 +173,12 @@ def _graph_status() -> dict:
     return {"graph_auth": None, "graph_account": None}
 
 
-_device_login: DeviceCodeLogin | None = None
-
-
 def _login() -> DeviceCodeLogin:
-    global _device_login
+    """El estado vive en la base (cifrado): cada petición, sea cual sea la instancia, crea su objeto."""
     store = graph_session.token_store()
     if store is None:
-        raise HTTPException(409, "No hay dónde guardar la sesión de Microsoft: configure INV_TOKEN_ENCRYPTION_KEY "
-                                 "(nube) o INV_GRAPH_TOKEN_FILE (Windows).")
-    pending = graph_session.pending_store()
-    if pending is not None:  # nube: el estado vive en la base, cada petición crea su objeto
-        return DeviceCodeLogin(store, pending_store=pending)
-    if _device_login is None or _device_login.store.path != store.path:
-        _device_login = DeviceCodeLogin(store)
-    return _device_login
+        raise HTTPException(409, "No hay dónde guardar la sesión de Microsoft: configure INV_TOKEN_ENCRYPTION_KEY.")
+    return DeviceCodeLogin(store, pending_store=graph_session.pending_store())
 
 
 @router.post("/sources/intune/connect")
@@ -264,8 +253,7 @@ def get_settings_api(db: Session = Depends(get_db), _: CurrentUser = Reader):
     hb = db.get(AppSetting, "worker.heartbeat")
     out["worker.heartbeat"] = hb.value if hb else None
     s = get_settings()
-    out["runtime"] = {"environment": s.environment, "auth_mode": s.auth_mode, "graph_configured": graph_session.configured(),
-                      "panda_drop_dir_configured": bool(s.panda_drop_dir), "stale_device_days": s.stale_device_days}
+    out["runtime"] = {"environment": s.environment, "auth_mode": s.auth_mode, "graph_configured": graph_session.configured(), "stale_device_days": s.stale_device_days}
     return out
 
 
@@ -291,16 +279,6 @@ def set_schedule(body: ScheduleIn, db: Session = Depends(get_db), user: CurrentU
     return row.value
 
 
-@router.put("/settings/stale-days")
-def set_stale(days: int = Query(..., ge=1, le=60), db: Session = Depends(get_db), user: CurrentUser = Admin):
-    row = db.get(AppSetting, "alerts.stale_source_days") or AppSetting(key="alerts.stale_source_days")
-    row.value, row.updated_by = days, user.upn
-    db.add(row)
-    audit.record(db, user.upn, "settings.update", "app_setting", row.key, f"stale_source_days={days}")
-    db.commit()
-    return {"ok": True}
-
-
 # --------------------------------------------------------------------------- inventarios mensuales
 def _snap(s: InventorySnapshot) -> dict:
     return {"id": s.id, "period": s.period, "version": s.version, "status": s.status, "is_complete": s.is_complete,
@@ -312,12 +290,6 @@ def _snap(s: InventorySnapshot) -> dict:
 def list_snapshots(db: Session = Depends(get_db), _: CurrentUser = Reader):
     return [_snap(s) for s in db.execute(select(InventorySnapshot).order_by(
         InventorySnapshot.period.desc(), InventorySnapshot.version.desc())).scalars()]
-
-
-@router.get("/snapshots/coverage")
-def snapshot_coverage(period: str = Query(..., pattern=r"^\d{4}-(0[1-9]|1[0-2])$"), db: Session = Depends(get_db),
-                      _: CurrentUser = Reader):
-    return snapshots.coverage(db, period)
 
 
 class SnapshotIn(BaseModel):
@@ -719,14 +691,9 @@ def dashboard(db: Session = Depends(get_db), _: CurrentUser = Reader):
     snap = db.execute(select(InventorySnapshot).where(InventorySnapshot.period == period)
                       .order_by(InventorySnapshot.version.desc()).limit(1)).scalar_one_or_none()
     recent_runs = db.execute(select(InventoryRun).order_by(InventoryRun.id.desc()).limit(6)).scalars().all()
-    recent_changes = db.execute(select(InventoryChange).where(InventoryChange.change_type != "software_new_product")
-                                .order_by(InventoryChange.id.desc()).limit(10)).scalars().all()
     top_alerts = db.execute(select(Alert).where(Alert.status != "resolved").order_by(
         (Alert.severity == "critical").desc(), Alert.id.desc()).limit(6)).scalars().all()
     since_30 = now - timedelta(days=30)
-    changes_30 = dict(db.execute(select(InventoryChange.change_type, func.count())
-                                 .where(InventoryChange.detected_at >= since_30)
-                                 .group_by(InventoryChange.change_type)).all())
     # Serie diaria de actividad de software (instalaciones, desinstalaciones y cambios de versión).
     day = func.date(InventoryChange.detected_at)
     daily_types = ("software_installed", "software_removed", "software_version_changed")
@@ -810,8 +777,6 @@ def dashboard(db: Session = Depends(get_db), _: CurrentUser = Reader):
         "monthly": {"period": period, "snapshot": _snap(snap) if snap else None,
                     "coverage": snapshots.coverage(db, period)},
         "runs": [_run(r) for r in recent_runs],
-        "changes": [_change(c) for c in recent_changes],
-        "changes_30d": changes_30,
         "changes_daily": changes_daily,
         "changes_weekly": changes_weekly,
         "departments": [{"name": n, "devices": c} for n, c in dept_rows],

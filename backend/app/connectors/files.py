@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from app.connectors.base import ConnectorError, DeviceRecord, ExtractResult, InstallRecord
-from app.legacy import parse_panda_text
+from app.parsers.panda import parse_panda_text
 
 
 def decode(content: bytes) -> str:

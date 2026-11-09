@@ -7,7 +7,7 @@ la base de datos anterior queda intacta. El código de la aplicación de escrito
 
 1. **Copia de seguridad** de la BD actual (`mysqldump`). Es el punto de recuperación.
 2. Crear un usuario MySQL **de solo lectura** sobre la BD anterior.
-3. Instalar el servicio (ver [deployment.md](deployment.md)); crea la BD nueva vacía.
+3. Preparar la base nueva vacía (ver [despliegue-nube.md](despliegue-nube.md), migraciones de Alembic).
 4. Simulación (no escribe nada, muestra el informe):
    ```powershell
    cd backend

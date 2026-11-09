@@ -1,27 +1,29 @@
 # Arquitectura
 
 ```
-Navegador (http://127.0.0.1:8180)
-        │  HTTPS/HTTP local
-┌───────▼─────────────────────────────── Servicio de Windows "InventarioAsserta" ─┐
-│  app.server (un proceso)                                                         │
-│   ├─ Uvicorn + FastAPI ── /api/*  (REST, RBAC)                                   │
-│   │                    └─ /*      (interfaz React compilada: frontend/dist)      │
-│   └─ Hilo worker ──────── cola inventory_runs · programación mensual ·           │
-│                           carpeta supervisada Panda · alertas de fuentes         │
-└──────────────┬───────────────────────────────────────────────┬──────────────────┘
-               │ SQLAlchemy                                    │ HTTPS (Graph)
-        SQLite (ProgramData)  o  MySQL 8                 Microsoft Graph / Intune
+Navegador ──HTTPS──► Vercel
+                      ├─ /*      interfaz React (frontend/dist, CDN)
+                      └─ /api/*  función Python api/index.py → FastAPI (REST, RBAC, login Entra ID)
+                                   │ lanza el worker al encolar trabajo (workflow_dispatch)
+                                   ▼
+GitHub Actions ── worker.yml (python -m app.worker --once) ◄── pg_cron de Supabase, cada hora
+   cola inventory_runs · programación mensual · borrador del inventario mensual · alertas
+                                   │
+           ┌───────────────────────┴───────────────────────┐
+           ▼ SQLAlchemy (psycopg 3)                         ▼ HTTPS
+   Supabase · PostgreSQL 16 (UE)                    Microsoft Graph / Intune
 ```
+
+Detalles de despliegue: [despliegue-nube.md](despliegue-nube.md).
 
 ## Componentes (backend/app)
 
 | Módulo | Responsabilidad |
 |---|---|
-| `core/config.py` | Configuración por variables de entorno / `inventario.env`; validaciones de seguridad |
-| `core/security.py` | Autenticación (`local`, `entra`, `dev`) y autorización por rol en el backend |
+| `core/config.py` | Configuración por variables de entorno (`.env` solo en desarrollo); validaciones de seguridad |
+| `core/security.py` | Autenticación (`entra`, `dev` solo fuera de producción) y autorización por rol |
 | `models/` | Modelo de datos (ver [data-model.md](data-model.md)) |
-| `connectors/` | `graph.py` (cliente Graph con reintentos), `intune.py`, `files.py` (Panda, CSV Intune) |
+| `connectors/` | `graph.py` (cliente Graph con reintentos), `graph_delegated.py` (sesión de usuario cifrada), `intune.py`, `files.py` (Panda, CSV Intune) |
 | `services/sync.py` | Motor común de sincronización (pipeline, idempotencia, salvaguardas) |
 | `services/devices.py` | Identidad y conciliación de dispositivos, asignaciones con historial |
 | `services/software.py` | Catálogo, alias, versiones, autorización efectiva |
@@ -29,13 +31,15 @@ Navegador (http://127.0.0.1:8180)
 | `services/snapshots.py` | Inventarios mensuales: generación, cobertura, revisión, comparación |
 | `services/alerts.py`, `audit.py` | Alertas idempotentes; auditoría encadenada por hash |
 | `api/routes/` | API REST (documentación OpenAPI en `/api/docs` fuera de producción) |
-| `worker.py` | Pasada del worker (también ejecutable de forma independiente) |
-| `server.py`, `winservice.py` | Proceso único y su envoltorio como servicio de Windows |
+| `worker.py` | Pasada del worker (`--once` en GitHub Actions; bucle continuo en desarrollo) |
+| `services/dispatch.py`, `services/graph_session.py` | Lanzar el worker desde la API; dónde vive la sesión de Intune |
+| `copy_database.py` | Copia íntegra de una base a otra (p. ej. a Supabase) |
 | `legacy_import.py` | Migración desde las tablas de la versión de escritorio |
+| `maintenance.py`, `demo_data.py` | Renormalización del catálogo; datos sintéticos para desarrollo |
 
 ## Pipeline de sincronización
 
-1. **Extracción** por conector (`Connector.extract` → `ExtractResult`).
+1. **Extracción** por conector (`extract(params, log)` → `ExtractResult`).
 2. **Validación** (claves duplicadas, software huérfano).
 3. **Observaciones originales** (`inventory_observations`, payload tal cual).
 4. **Normalización** de nombres/editores/versiones.

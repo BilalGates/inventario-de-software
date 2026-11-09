@@ -18,8 +18,6 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import JSON, Base, utcnow
 
-DEVICE_STATUSES = ("active", "in_stock", "repair", "retired", "lost")
-
 
 class DeviceType(Base):
     __tablename__ = "device_types"

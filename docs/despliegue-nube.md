@@ -218,12 +218,13 @@ La región de la función es Frankfurt (`fra1` en `vercel.json`), la misma zona 
 Cuando todo lo anterior esté comprobado:
 
 ```powershell
-.\deploy\windows\uninstall-autostart.ps1     # o desinstale el servicio de Windows
+Stop-ScheduledTask -TaskName "Inventario Asserta"
+Unregister-ScheduledTask -TaskName "Inventario Asserta" -Confirm:$false
 ```
 
-Conserve la base SQLite (`inventario.db`) un tiempo como copia. La instalación de Windows
-(`deploy/windows`, `app/winservice.py`, `app/supervisor.py`) queda en el repositorio como histórico,
-pero ya no se mantiene.
+Conserve la base SQLite (`%LOCALAPPDATA%\InventarioAsserta\inventario.db`) un tiempo como copia.
+El código de la instalación de Windows ya no está en el repositorio (consúltelo en el historial de
+git si hiciera falta).
 
 ## Mantenimiento
 

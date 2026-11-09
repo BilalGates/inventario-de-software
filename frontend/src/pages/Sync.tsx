@@ -72,7 +72,7 @@ export default function Sync() {
                     {s.code === "panda" ? "Importar exportación" : "Importar CSV"}</Button>
                 </div>
               )}
-              {s.code === "panda" && <p className="mt-3 text-xs text-muted">Carpeta supervisada: {s.watch_folder ? "activa" : "no configurada"}. API de WatchGuard: pendiente de confirmar licencia.</p>}
+              {s.code === "panda" && <p className="mt-3 text-xs text-muted">Suba la exportación de cada equipo desde aquí. API de WatchGuard: pendiente de confirmar licencia.</p>}
             </Card>
           ))}
         </div>

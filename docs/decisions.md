@@ -55,3 +55,10 @@ python312.dll, reproducible y previa al código de la aplicación). Se sustituye
 programada al iniciar sesión, sin administrador, que lanza `app.supervisor` (reinicia la
 aplicación si termina). Diferencia: arranca al iniciar sesión, no al encender el equipo;
 suficiente para un equipo de uso personal de IT.
+
+### D13 — Nube: Vercel + Supabase + GitHub Actions (2026-11)
+Sustituye a D1 y D12. La interfaz y la API se publican en Vercel (función Python), los datos en
+Supabase (PostgreSQL, UE) y el worker corre en GitHub Actions (`--once`), lanzado cada hora por
+`pg_cron` y al momento desde la API. Login obligatorio con Entra ID. La sesión de Intune se guarda
+cifrada en la base. Se elimina del repositorio la instalación de Windows (servicio, tarea programada,
+supervisor, carpetas supervisadas y token DPAPI); queda en el historial de git.
