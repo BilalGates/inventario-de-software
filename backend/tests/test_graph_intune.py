@@ -153,3 +153,19 @@ def test_action_with_non_json_body_is_accepted():
     fake = FakeGraph([device(1)], {})
     fake.fail = lambda req: httpx.Response(202, text="Accepted") if req.method == "POST" else None
     assert fake.client().post("/v1.0/deviceManagement/managedDevices/intune-1/syncDevice") == {}
+
+
+@pytest.mark.parametrize("model, expected", [
+    ("Latitude 7350", "laptop"), ("Inspiron 5491 2n1", "laptop"), ("XPS 13 9370", "laptop"),
+    ("Dell Pro 16 Plus PB16250", "laptop"), ("Dell Pro 14 Plus PB14250", "laptop"), ("Dell 16 DC16251", "laptop"),
+    ("17Z90Q-G.AD78B", "laptop"), ("XPS 14 (Dell 14 Premium) DA14260", "laptop"), ("Inspiron 15 3530", "laptop"),
+    ("OptiPlex 7010", "desktop"), ("Precision 3680 Tower", "desktop"),
+    ("Virtual Machine", None), (None, None),
+])
+def test_device_type_from_model(model, expected):
+    assert map_device(device(1, model=model)).device_type == expected
+
+
+def test_mobile_and_server_come_from_os():
+    assert map_device(device(1, operatingSystem="iOS", model="iPhone 15")).device_type == "mobile"
+    assert map_device(device(1, operatingSystem="Windows Server", model="OptiPlex")).device_type == "server"

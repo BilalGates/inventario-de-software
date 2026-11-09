@@ -20,6 +20,7 @@ no se ha verificado un endpoint estable en Graph v1.0 para él. Ver docs/integra
 """
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import Any
 
@@ -62,13 +63,26 @@ def _key(name: Any) -> str:
     return str(name or "").strip().lower()
 
 
-def _device_type(os_name: str | None) -> str | None:
+# Portátil/sobremesa por familia de modelo (Intune no lo informa en v1.0). Lo que no encaja queda
+# sin clasificar: nunca se inventa, y una clasificación manual no se pisa (ver apply_record).
+_LAPTOP = re.compile(r"latitude|xps|inspiron|2n1|2-in-1|dell pro (14|16)|dell (14|16) |\bgram\b|\d{2}z9\dq|"
+                     r"thinkpad|elitebook|probook|zbook|surface (laptop|pro|book)|macbook")
+_DESKTOP = re.compile(r"optiplex|precision (tower|t\d)|precision \d{4} tower|elitedesk|prodesk|thinkcentre|"
+                      r"vostro \d+ (tower|small)|imac|mac mini|dell pro (slim|tower|micro)")
+
+
+def _device_type(os_name: str | None, model: str | None = None) -> str | None:
     os_l = (os_name or "").lower()
     if os_l in {"ios", "ipados", "android"}:
         return "mobile"
     if "server" in os_l:
         return "server"
-    return None  # portátil/sobremesa no se deduce del SO: se clasifica manualmente
+    model_l = (model or "").lower()
+    if _DESKTOP.search(model_l):
+        return "desktop"
+    if _LAPTOP.search(model_l):
+        return "laptop"
+    return None
 
 
 def map_device(d: dict) -> DeviceRecord:
@@ -86,7 +100,7 @@ def map_device(d: dict) -> DeviceRecord:
         model=_text(d.get("model")),
         os_name=_text(d.get("operatingSystem")),
         os_version=_text(d.get("osVersion")),
-        device_type=_device_type(d.get("operatingSystem")),
+        device_type=_device_type(d.get("operatingSystem"), d.get("model")),
         user_upn=upn.lower() if upn else None,
         user_display_name=_text(d.get("userDisplayName")),
         ram_bytes=_positive(d.get("physicalMemoryInBytes")),
