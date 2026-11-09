@@ -24,7 +24,16 @@ import jwt
 from app.connectors.base import ConnectorError
 
 CLIENT_ID = "14d82eec-204b-4c2f-b7e8-296a70dab67e"  # Microsoft Graph Command Line Tools (app pública de Microsoft)
-SCOPE = "https://graph.microsoft.com/DeviceManagementManagedDevices.Read.All offline_access openid profile"
+# Lectura del inventario + detalle de conformidad (Configuration.Read.All) + acciones remotas
+# (PrivilegedOperations.All: sincronizar, Defender). Una sesión antigua sin estos dos últimos sigue
+# sincronizando; para usarlos hay que volver a conectar.
+SCOPE = ("https://graph.microsoft.com/DeviceManagementManagedDevices.Read.All "
+         "https://graph.microsoft.com/DeviceManagementConfiguration.Read.All "
+         "https://graph.microsoft.com/DeviceManagementManagedDevices.PrivilegedOperations.All "
+         "offline_access openid profile")
+# Renovación: .default devuelve los permisos ya concedidos, así una sesión iniciada antes de ampliar
+# SCOPE no falla por falta de consentimiento (solo carecerá de los permisos nuevos).
+REFRESH_SCOPE = "https://graph.microsoft.com/.default offline_access"
 LOGIN = "https://login.microsoftonline.com"
 
 
@@ -215,7 +224,7 @@ class DelegatedTokenProvider:
         try:
             resp = self.http.post(f"{LOGIN}/{tenant}/oauth2/v2.0/token", data={
                 "grant_type": "refresh_token", "client_id": CLIENT_ID, "refresh_token": saved["refresh_token"],
-                "scope": SCOPE})
+                "scope": REFRESH_SCOPE})
         except httpx.HTTPError as exc:
             raise ConnectorError(f"No se pudo contactar con Entra ID: {type(exc).__name__}", kind="network") from exc
         if resp.status_code != 200:

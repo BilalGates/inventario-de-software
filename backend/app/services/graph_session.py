@@ -37,3 +37,18 @@ def configured() -> bool:
         return True
     saved = saved_session()
     return bool(saved and saved.get("refresh_token"))
+
+
+def make_client():
+    """Cliente de Graph con las credenciales disponibles: aplicación (INV_GRAPH_*) o sesión de usuario."""
+    from app.connectors.graph import GraphClient
+    from app.connectors.graph_delegated import DelegatedTokenProvider
+
+    s = get_settings()
+    provider = None
+    store = token_store()
+    if not s.graph_app_configured and store is not None:
+        provider = DelegatedTokenProvider(store)
+    return GraphClient(s.graph_tenant_id, s.graph_client_id, s.graph_client_secret, s.graph_certificate_path,
+                       s.graph_certificate_thumbprint, s.graph_base_url, s.graph_max_retries,
+                       token_provider=provider)

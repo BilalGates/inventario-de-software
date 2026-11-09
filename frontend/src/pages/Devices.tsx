@@ -37,7 +37,16 @@ const columns: Column<DeviceRow>[] = [
   { id: "sources", header: "Fuentes",
     cell: (d) => d.sources?.length ? <div className="flex gap-1">{d.sources.map((s) => <SourceBadge key={s} source={s} />)}</div>
       : <SourceBadge source="manual" /> },
-  { id: "compliance", header: "Cumplimiento", cell: (d) => <ComplianceBadge value={d.compliance_state} /> },
+  { id: "compliance", header: "Cumplimiento", cell: (d) => (
+    <div className="flex flex-col items-start gap-0.5">
+      <ComplianceBadge value={d.compliance_state} reasons={d.compliance_reasons} />
+      {d.compliance_state !== "compliant" && d.compliance_reasons?.[0] && (
+        <span className="block max-w-44 truncate text-2xs text-muted" title={d.compliance_reasons.join(" · ")}>
+          {d.compliance_reasons[0]}{d.compliance_reasons.length > 1 ? ` +${d.compliance_reasons.length - 1}` : ""}
+        </span>
+      )}
+    </div>
+  ) },
   { id: "freshness", header: "Actualidad", sortKey: "last_seen_at", cell: (d) => (
     <div className="flex flex-col items-start gap-0.5">
       <FreshnessBadge value={d.freshness} />

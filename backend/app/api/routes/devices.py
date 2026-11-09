@@ -8,6 +8,8 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.api.common import Page, export_response, not_found, paginate
+from app.connectors import intune_compliance
+from app.connectors.base import ConnectorError
 from app.core.config import get_settings
 from app.core.security import CurrentUser, Reader, Technician
 from app.db import get_db, utcnow
@@ -24,7 +26,7 @@ from app.models import (
     SoftwareVersion,
     User,
 )
-from app.services import audit
+from app.services import audit, graph_session
 from app.services.devices import reassign, upsert_user
 from app.services.normalization import hostname_key
 from app.services.software import PolicyEvaluator
@@ -69,6 +71,7 @@ def serialize(d: Device, stale_days: int, extra: dict | None = None) -> dict:
         "primary_user": (d.primary_user.display_name or d.primary_user.upn) if d.primary_user else None,
         "primary_user_upn": d.primary_user.upn if d.primary_user else None,
         "location": d.location, "compliance_state": d.compliance_state, "encrypted": d.encrypted,
+        "compliance_reasons": intune_compliance.reasons(d.compliance_details),
         "ram_bytes": d.ram_bytes, "storage_total_bytes": d.storage_total_bytes,
         "last_seen_at": d.last_seen_at, "last_seen_source": d.last_seen_source,
         "source_last_sync_at": d.source_last_sync_at, **(extra or {}),
@@ -243,8 +246,81 @@ def get_device(device_id: int, db: Session = Depends(get_db), _: CurrentUser = R
         "external_ids": [{"source": e.source, "type": e.id_type, "value": e.value, "first_seen_at": e.first_seen_at,
                           "last_seen_at": e.last_seen_at} for e in d.external_ids],
         "legacy_equipo_id": d.legacy_equipo_id,
+        "intune_device_id": _intune_id(d),
     })
     return data
+
+
+# --------------------------------------------------------------------------- conformidad (Intune)
+def _intune_id(d: Device) -> str | None:
+    return next((e.value for e in d.external_ids if e.source == "intune" and e.id_type == "intune_device_id"), None)
+
+
+def _compliance_payload(d: Device) -> dict:
+    return {"compliance_state": d.compliance_state, "checked_at": d.compliance_checked_at,
+            "intune_device_id": _intune_id(d), "policies": (d.compliance_details or {}).get("policies", []),
+            "actions": [{"code": k, "label": v[2]} for k, v in intune_compliance.ACTIONS.items()]}
+
+
+def _intune_device(db: Session, device_id: int) -> tuple[Device, str]:
+    d = db.get(Device, device_id)
+    if d is None:
+        raise not_found("Dispositivo")
+    intune_id = _intune_id(d)
+    if not intune_id:
+        raise HTTPException(409, "Este dispositivo no está gestionado por Intune.")
+    if not graph_session.configured():
+        raise HTTPException(409, "El conector de Intune no tiene credenciales configuradas.")
+    return d, intune_id
+
+
+def _graph_http_error(exc: ConnectorError, need: str) -> HTTPException:
+    if exc.kind == "permission":
+        return HTTPException(403, f"Microsoft Graph no concede el permiso {need}. Vuelva a conectar Intune desde "
+                                  "Sincronización (puede requerir consentimiento de un administrador del tenant).")
+    if exc.kind in ("auth", "config"):
+        return HTTPException(409, str(exc))
+    return HTTPException(502, f"Intune no respondió correctamente: {exc}")
+
+
+@router.get("/{device_id}/compliance")
+def device_compliance(device_id: int, refresh: bool = False, db: Session = Depends(get_db), _: CurrentUser = Reader):
+    """Detalle guardado (última sincronización) o, con refresh, consultado ahora a Intune."""
+    if not refresh:
+        d = db.get(Device, device_id)
+        if d is None:
+            raise not_found("Dispositivo")
+        return _compliance_payload(d)
+    d, intune_id = _intune_device(db, device_id)
+    client = graph_session.make_client()
+    try:
+        body = client.get(f"/v1.0/deviceManagement/managedDevices/{intune_id}", {"$select": "id,complianceState"})
+        details = intune_compliance.fetch_compliance(client, intune_id)
+    except ConnectorError as exc:
+        raise _graph_http_error(exc, "DeviceManagementConfiguration.Read.All") from exc
+    if body.get("complianceState"):
+        d.compliance_state = body["complianceState"]
+    d.compliance_details, d.compliance_checked_at = details, utcnow()
+    db.commit()
+    return _compliance_payload(d)
+
+
+class IntuneActionIn(BaseModel):
+    action: str = Field(pattern="^(" + "|".join(intune_compliance.ACTIONS) + ")$")
+
+
+@router.post("/{device_id}/intune-actions", status_code=202)
+def device_intune_action(device_id: int, body: IntuneActionIn, db: Session = Depends(get_db),
+                         user: CurrentUser = Technician):
+    d, intune_id = _intune_device(db, device_id)
+    try:
+        label = intune_compliance.run_action(graph_session.make_client(), intune_id, body.action)
+    except ConnectorError as exc:
+        raise _graph_http_error(exc, "DeviceManagementManagedDevices.PrivilegedOperations.All") from exc
+    audit.record(db, user.upn, "device.intune_action", "device", d.id, f"{label}: {d.display_name}")
+    db.commit()
+    return {"status": "accepted", "action": body.action, "label": label,
+            "message": "Intune ha aceptado la acción. El resultado tarda unos minutos en reflejarse."}
 
 
 @router.patch("/{device_id}")

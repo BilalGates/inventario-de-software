@@ -9,10 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.connectors.base import ConnectorError
 from app.connectors.files import IntuneCsvConnector, PandaFileConnector
-from app.connectors.graph import GraphClient
-from app.connectors.graph_delegated import DelegatedTokenProvider
 from app.connectors.intune import IntuneConnector
-from app.core.config import get_settings
 from app.db import utcnow
 from app.models import InventoryRun, InventorySource
 from app.services import audit, graph_session
@@ -25,14 +22,7 @@ def default_connector_factory(source: InventorySource, params: dict[str, Any]):
     if source.code == "intune":
         if params.get("content") is not None:
             return IntuneCsvConnector()
-        s = get_settings()
-        provider = None
-        store = graph_session.token_store()
-        if not s.graph_app_configured and store is not None:
-            provider = DelegatedTokenProvider(store)
-        client = GraphClient(s.graph_tenant_id, s.graph_client_id, s.graph_client_secret, s.graph_certificate_path,
-                             s.graph_certificate_thumbprint, s.graph_base_url, s.graph_max_retries,
-                             token_provider=provider)
+        client = graph_session.make_client()
         cfg = source.config or {}
         params.setdefault("software_strategy", cfg.get("software_strategy", "per_device"))
         return IntuneConnector(client, api_version=cfg.get("api_version", "v1.0"))

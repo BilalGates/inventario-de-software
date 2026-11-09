@@ -65,6 +65,9 @@ class Device(Base):
     ownership: Mapped[str | None] = mapped_column(String(30))
     enrolled_at: Mapped[datetime | None] = mapped_column(DateTime)
     source_last_sync_at: Mapped[datetime | None] = mapped_column(DateTime)  # último check-in según la fuente
+    # Directivas/ajustes de Intune que fallan ({"policies": [...]}) y cuándo se comprobó.
+    compliance_details: Mapped[dict | None] = mapped_column(JSON)
+    compliance_checked_at: Mapped[datetime | None] = mapped_column(DateTime)
 
     first_seen_at: Mapped[datetime | None] = mapped_column(DateTime)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime)  # última vez visto en una sync completa

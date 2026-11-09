@@ -64,8 +64,10 @@ export const SourceBadge = ({ source }: { source: string }) => (
   </span>
 );
 
-export function ComplianceBadge({ value }: { value: string | null }) {
+/** Cumplimiento de Intune; con `reasons`, el motivo aparece al pasar el ratón. */
+export function ComplianceBadge({ value, reasons }: { value: string | null; reasons?: string[] }) {
   if (!value) return <span className="text-muted">—</span>;
   const mark: Mark = value === "compliant" ? "ink" : value === "noncompliant" ? "signal" : "muted";
-  return <StatusText mark={mark}>{COMPLIANCE_LABEL[value] ?? value}</StatusText>;
+  const title = reasons?.length ? `Motivo: ${reasons.join(" · ")}` : undefined;
+  return <StatusText mark={mark} title={title}>{COMPLIANCE_LABEL[value] ?? value}</StatusText>;
 }

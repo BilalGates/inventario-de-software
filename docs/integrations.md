@@ -9,7 +9,12 @@ Dos formas de autenticarse; si hay credenciales de aplicación, tienen prioridad
 *Sincronización › Microsoft Intune › Conectar con Microsoft* (rol administrador) muestra un código
 de dispositivo; se introduce en https://microsoft.com/devicelogin con una cuenta con acceso a
 Intune. Usa el cliente público "Microsoft Graph Command Line Tools" (el mismo que el script
-PowerShell) con el permiso delegado `DeviceManagementManagedDevices.Read.All`.
+PowerShell) con los permisos delegados `DeviceManagementManagedDevices.Read.All` (inventario),
+`DeviceManagementConfiguration.Read.All` (motivo de la no conformidad) y
+`DeviceManagementManagedDevices.PrivilegedOperations.All` (acciones remotas: sincronizar, Defender).
+Los dos últimos pueden requerir consentimiento de un administrador del tenant. Una sesión iniciada
+antes de ampliar los permisos sigue sincronizando (la renovación usa `.default`, es decir, lo ya
+concedido); para ver el motivo o lanzar acciones hay que **volver a conectar**.
 
 - El refresh token se guarda en la base de datos cifrado con AES-GCM y `INV_TOKEN_ENCRYPTION_KEY`,
   clave que solo conocen Vercel y GitHub Actions.
@@ -22,7 +27,9 @@ PowerShell) con el permiso delegado `DeviceManagementManagedDevices.Read.All`.
 
 1. Registro de aplicación en Entra ID (p. ej. "Inventario Asserta – Graph").
 2. Permiso de **aplicación** `DeviceManagementManagedDevices.Read.All` con consentimiento de
-   administrador. Es el único necesario (solo lectura).
+   administrador (inventario, solo lectura). Opcionales: `DeviceManagementConfiguration.Read.All`
+   (motivo de la no conformidad) y `DeviceManagementManagedDevices.PrivilegedOperations.All`
+   (acciones remotas desde la ficha del equipo).
 3. Credencial: **certificado** (recomendado) o secreto. En `inventario.env`:
    ```
    INV_GRAPH_TENANT_ID=<tenant>
@@ -51,6 +58,25 @@ PowerShell) con el permiso delegado `DeviceManagementManagedDevices.Read.All`.
     ~24 min por las limitaciones (429) de Intune. `$batch` no ayuda: Intune limita cada
     sub-petición (probado: 4075 limitaciones y extracción parcial).
   - El progreso de la extracción se publica en el registro de la ejecución mientras corre.
+
+### Conformidad: motivo y acciones remotas
+
+- Motivo: `GET /v1.0/deviceManagement/managedDevices/{id}/deviceCompliancePolicyStates`; se
+  guardan solo las directivas en `nonCompliant`/`error`/`conflict` y sus `settingStates` en fallo.
+  Si v1.0 no detalla los ajustes, se repite en `beta`. Se pide durante la sincronización **solo para
+  los equipos no conformes** (no esencial: sin permiso se avisa y se sigue) y bajo demanda desde la
+  ficha (*Consultar ahora*). Al pasar a conforme, el motivo se limpia.
+- Los ajustes conocidos (BitLocker, Secure Boot, TPM, versión mínima del SO, Defender, firmas,
+  antivirus, firewall, «Is active» de la directiva por defecto…) se traducen con una pista de
+  corrección (`app/connectors/intune_compliance.py`); los desconocidos se muestran tal cual.
+- Acciones (rol técnico, con auditoría `device.intune_action`):
+  `POST …/managedDevices/{id}/syncDevice`, `windowsDefenderUpdateSignatures` y
+  `windowsDefenderScan` (`quickScan: true`). Lista cerrada: no se exponen acciones destructivas
+  (borrado, retirada, reinicio).
+- La conformidad la evalúa el equipo: estas acciones fuerzan la reevaluación o resuelven causas
+  concretas, pero no «aplican» la conformidad. El resultado tarda minutos.
+- **Pendiente de verificar en el tenant**: que v1.0 devuelve `settingStates` rellenos y los
+  nombres exactos de los ajustes (`setting`) de las directivas de Asserta.
 
 ### Discovered Apps vs. App Inventory
 

@@ -3,6 +3,7 @@ import { ArrowLeft, Archive, Pencil, RotateCcw, Upload } from "lucide-react";
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { AuthBadge, ComplianceBadge, DeviceStatusBadge, FreshnessBadge, SourceBadge } from "@/components/badges";
+import { CompliancePanel } from "@/components/CompliancePanel";
 import { DataTable, type Column } from "@/components/DataTable";
 import { DeviceForm, type DeviceFormValues } from "@/components/DeviceForm";
 import { UploadDialog } from "@/components/UploadDialog";
@@ -105,6 +106,7 @@ export default function DeviceDetail() {
               </div>
             )}
           </Card>
+          {(d.intune_device_id || d.compliance_state) && <CompliancePanel deviceId={id} className="lg:col-span-3" />}
         </div>
       )}
 
