@@ -169,7 +169,8 @@ def _graph_status() -> dict:
         return {"graph_auth": "app", "graph_account": None}
     saved = graph_session.saved_session()
     if saved:
-        return {"graph_auth": "delegated", "graph_account": saved.get("account") or None}
+        return {"graph_auth": "delegated", "graph_account": saved.get("account") or None,
+                "graph_read_only": saved.get("scopes") == "read"}
     return {"graph_auth": None, "graph_account": None}
 
 

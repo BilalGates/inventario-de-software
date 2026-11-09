@@ -93,6 +93,11 @@ class SyncEngine:
             if result.errors:
                 run.error = "\n".join(result.errors[:20])
             if source.kind == "api":
+                if result.stats.get("software_strategy_fallback"):
+                    open_alert(db, f"strategy_fallback:{source.code}", "sync_partial", "warning",
+                               f"{source.name}: la lectura de software por equipo (beta) ha dejado de funcionar",
+                               "Se usó la estrategia por aplicación (v1.0). Revise docs/integrations.md.",
+                               run_id=run.id)
                 if run.status == "succeeded" and run.is_complete:
                     source.last_success_at = run.finished_at = utcnow()
                     source.last_error = None

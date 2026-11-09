@@ -169,3 +169,13 @@ def test_device_type_from_model(model, expected):
 def test_mobile_and_server_come_from_os():
     assert map_device(device(1, operatingSystem="iOS", model="iPhone 15")).device_type == "mobile"
     assert map_device(device(1, operatingSystem="Windows Server", model="OptiPlex")).device_type == "server"
+
+
+def test_per_device_falls_back_to_per_app_when_beta_is_gone():
+    fake = FakeGraph([device(1), device(2)], APPS)
+    fake.fail = lambda req: (httpx.Response(400, json={"error": {"code": "BadRequest"}})
+                             if req.url.params.get("$expand") == "detectedApps" else None)
+    result = IntuneConnector(fake.client()).extract({"software_strategy": "per_device"}, lambda m: None)
+    assert result.complete and result.stats["software_strategy"] == "per_app"
+    assert result.stats["software_strategy_fallback"] is True
+    assert {i.name for i in result.installs} == {"Google Chrome", "7-Zip 23.01 (x64)", "Notepad++"}

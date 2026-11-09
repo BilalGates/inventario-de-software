@@ -196,6 +196,7 @@ export interface Source {
   /** Solo Intune: "app" (credenciales INV_GRAPH_*), "delegated" (sesión iniciada desde la web) o null. */
   graph_auth?: "app" | "delegated" | null;
   graph_account?: string | null;
+  graph_read_only?: boolean;
 }
 
 export interface DeviceCodeStart {

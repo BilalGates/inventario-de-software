@@ -145,7 +145,18 @@ class IntuneConnector:
         # 2. Software.
         device_keys = {d.key for d in result.devices}
         if strategy == "per_device":
+            errors_before = len(result.errors)
             self._software_per_device(result, device_keys, log)
+            if device_keys and len(result.errors) - errors_before == len(device_keys):
+                # La ruta beta falla en todos los equipos (p. ej. Microsoft la retira): se repite con
+                # la estrategia v1.0 en esta misma ejecución en lugar de quedarse sin software.
+                del result.errors[errors_before:]
+                result.warnings.append("La lectura de software por equipo (beta) falló en todos los equipos; "
+                                       "se ha usado la estrategia por aplicación (v1.0), más lenta.")
+                log(result.warnings[-1])
+                result.stats["software_strategy_fallback"] = True
+                strategy = "per_app"
+                self._software_per_app(result, device_keys, log)
         else:
             self._software_per_app(result, device_keys, log)
 

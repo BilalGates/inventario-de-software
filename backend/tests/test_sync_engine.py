@@ -231,3 +231,22 @@ def test_intune_apps_csv_declared_complete_infers_removals_per_device(db):
     run = runs.enqueue(db, "intune", "upload", "t", {"content": apps(["A"]), "filename": "apps.csv"})
     db.commit()
     assert runs.execute_run(db, run).stats["software_removed"] == 0
+
+
+def test_strategy_fallback_opens_alert(db):
+    fake = FakeGraph([device(1), device(2)], APPS)
+    fake.fail = lambda req: (httpx.Response(400, json={"error": {"code": "BadRequest"}})
+                             if req.url.params.get("$expand") == "detectedApps" else None)
+    run = runs.enqueue(db, "intune", "manual", "tester")
+    db.commit()
+    runs.execute_run(db, run, factory=lambda src, params: _PerDevice(fake))
+    alert = db.execute(select(Alert).where(Alert.dedup_key == "strategy_fallback:intune")).scalar_one()
+    assert alert.severity == "warning"
+
+
+class _PerDevice:
+    def __init__(self, fake):
+        self.inner = IntuneConnector(fake.client())
+
+    def extract(self, params, log):
+        return self.inner.extract({**params, "software_strategy": "per_device"}, log)

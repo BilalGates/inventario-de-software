@@ -12,9 +12,14 @@ Intune. Usa el cliente público "Microsoft Graph Command Line Tools" (el mismo q
 PowerShell) con los permisos delegados `DeviceManagementManagedDevices.Read.All` (inventario),
 `DeviceManagementConfiguration.Read.All` (motivo de la no conformidad) y
 `DeviceManagementManagedDevices.PrivilegedOperations.All` (acciones remotas: sincronizar, Defender).
-Los dos últimos pueden requerir consentimiento de un administrador del tenant. Una sesión iniciada
-antes de ampliar los permisos sigue sincronizando (la renovación usa `.default`, es decir, lo ya
-concedido); para ver el motivo o lanzar acciones hay que **volver a conectar**.
+Los dos últimos pueden requerir consentimiento de un administrador del tenant.
+
+- La renovación pide siempre esos permisos explícitos, **nunca `.default`**: con este cliente
+  compartido, `.default` devolvería todo lo que se haya concedido alguna vez a Graph PowerShell en
+  el tenant (p. ej. permisos de escritura de directorio).
+- Una sesión iniciada antes de ampliar los permisos, sin consentimiento de los nuevos (AADSTS65001),
+  sigue sincronizando en **solo lectura**; Sincronización lo indica y ofrece reconectar. Hasta
+  entonces, el motivo de la no conformidad y las acciones remotas responden «vuelva a conectar».
 
 - El refresh token se guarda en la base de datos cifrado con AES-GCM y `INV_TOKEN_ENCRYPTION_KEY`,
   clave que solo conocen Vercel y GitHub Actions.
@@ -23,7 +28,16 @@ concedido); para ver el motivo o lanzar acciones hay que **volver a conectar**.
   "La sesión de Microsoft ha caducado" y hay que volver a conectar.
 - *Desconectar* borra el token; los datos importados se conservan. Ambos pasos quedan en auditoría.
 
-### Opción B: registro de aplicación (credenciales de aplicación)
+### Opción B: registro de aplicación (credenciales de aplicación) — recomendada en producción
+
+Por qué es preferible a la opción A:
+- **Permisos propios**: el cliente "Graph Command Line Tools" es compartido; sus consentimientos se
+  mezclan con los que usan los administradores en PowerShell. Un registro propio tiene solo lo que
+  necesita esta aplicación.
+- **Acceso condicional y revocación** por aplicación, sin afectar a Graph PowerShell.
+- **Trazabilidad**: en los registros de inicio de sesión de Entra aparece con su propio nombre, no
+  con el genérico de Microsoft.
+- **Sin dependencia de una persona**: no caduca porque una cuenta deje de usarse o cambie su contraseña.
 
 1. Registro de aplicación en Entra ID (p. ej. "Inventario Asserta – Graph").
 2. Permiso de **aplicación** `DeviceManagementManagedDevices.Read.All` con consentimiento de
@@ -57,7 +71,13 @@ concedido); para ver el motivo o lanzar acciones hay que **volver a conectar**.
     `…/detectedApps/{id}/managedDevices`. Técnica del script PowerShell; con ~1100 apps tarda
     ~24 min por las limitaciones (429) de Intune. `$batch` no ayuda: Intune limita cada
     sub-petición (probado: 4075 limitaciones y extracción parcial).
+  - Si `per_device` falla en **todos** los equipos (p. ej. Microsoft retira la ruta beta), la misma
+    ejecución repite la lectura con `per_app` (v1.0), deja un aviso y abre la alerta
+    `strategy_fallback:intune`. Un fallo en algunos equipos no activa el respaldo.
   - El progreso de la extracción se publica en el registro de la ejecución mientras corre.
+- Tipo de equipo: móvil/servidor por el SO; portátil/sobremesa por la familia del modelo
+  (Latitude, XPS, Inspiron, Dell Pro 14/16, LG gram… / OptiPlex, Precision Tower…). Solo se rellena
+  si el equipo no tiene tipo; lo desconocido queda «Sin clasificar».
 
 ### Conformidad: motivo y acciones remotas
 
