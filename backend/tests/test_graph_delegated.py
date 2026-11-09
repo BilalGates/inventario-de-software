@@ -107,3 +107,67 @@ def test_token_never_written_in_clear(tmp_path):
         assert b"texto-reconocible" not in raw
     else:
         assert json.loads(raw)["refresh_token"] == "texto-reconocible"
+
+
+# --------------------------------------------------------------------------- nube (sesión en la base)
+KEY = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="  # 32 bytes en base64, solo para pruebas
+
+
+def test_encrypted_store_in_database_is_not_plaintext(engine, db):
+    from app.connectors.graph_delegated import EncryptedSettingStore
+    from app.models import AppSetting
+
+    store = EncryptedSettingStore("secret.graph.session", KEY)
+    store.save({"refresh_token": "secreto-rt", "account": "it@asserta.test"})
+    raw = db.get(AppSetting, "secret.graph.session").value
+    assert "secreto-rt" not in json.dumps(raw)
+    assert store.load() == {"refresh_token": "secreto-rt", "account": "it@asserta.test"}
+    other = EncryptedSettingStore("secret.graph.session", "ZmVkY2JhOTg3NjU0MzIxMGZlZGNiYTk4NzY1NDMyMTA=")
+    assert other.load() is None  # otra clave: no se descifra
+    store.delete()
+    assert store.load() is None and not store.exists()
+
+
+def test_encryption_key_must_be_32_bytes():
+    from app.connectors.graph_delegated import EncryptedSettingStore
+
+    with pytest.raises(ValueError, match="32 bytes"):
+        EncryptedSettingStore("x", "corta")
+
+
+def test_device_code_login_survives_another_instance(engine):
+    """En Vercel, «Conectar» y cada comprobación pueden ir a instancias distintas."""
+    from app.connectors.graph_delegated import EncryptedSettingStore
+
+    def handler(req: httpx.Request):
+        if req.url.path.endswith("/devicecode"):
+            return httpx.Response(200, json={"device_code": "dc", "user_code": "ABC123", "expires_in": 900,
+                                             "interval": 0, "verification_uri": "https://microsoft.com/devicelogin"})
+        return httpx.Response(200, json={"access_token": "at", "refresh_token": "rt", "id_token": ID_TOKEN})
+
+    def instance():
+        return DeviceCodeLogin(EncryptedSettingStore("secret.graph.session", KEY), _http(handler),
+                               pending_store=EncryptedSettingStore("secret.graph.device_login", KEY))
+
+    assert instance().start()["user_code"] == "ABC123"
+    assert instance().poll() == {"status": "connected", "account": "it@asserta.test"}
+    assert instance().poll() == {"status": "idle"}  # el pendiente se borró
+    saved = EncryptedSettingStore("secret.graph.session", KEY).load()
+    assert saved["refresh_token"] == "rt" and saved["tenant_id"] == "tenant-1"
+
+
+def test_worker_uses_cloud_session_and_saves_rotated_token(engine, monkeypatch):
+    from app.core.config import get_settings
+    from app.models import InventorySource
+    from app.services import graph_session, runs
+
+    monkeypatch.setattr(get_settings(), "token_encryption_key", KEY)
+    assert graph_session.configured() is False
+    graph_session.token_store().save({"refresh_token": "rt-1", "tenant_id": "tenant-1"})
+    assert graph_session.configured() is True
+    connector = runs.default_connector_factory(InventorySource(code="intune", config={}), {})
+    provider = connector.client._token_provider
+    provider.http = _http(lambda req: httpx.Response(200, json={"access_token": "at", "refresh_token": "rt-2",
+                                                                 "expires_in": 3600}))
+    assert provider() == "at"
+    assert graph_session.saved_session()["refresh_token"] == "rt-2"  # rotado y guardado para la próxima
