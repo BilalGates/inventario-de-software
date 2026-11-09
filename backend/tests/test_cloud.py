@@ -155,3 +155,26 @@ def test_copy_database_replaces_users_created_by_login(tmp_path):
     assert verify(src, dst) == []
     with Session(dst) as db:
         assert sorted(db.execute(select(User.upn)).scalars()) == ["bilal@asserta.net", "elena@asserta.net"]
+
+
+def test_copy_database_reset_clears_worker_leftovers_but_never_real_inventory(tmp_path):
+    """El worker ejecutado antes de copiar deja ejecuciones y auditoría: --reset las borra."""
+    from app.models import AppSetting, AuditEvent
+
+    src, dst = _sqlite(tmp_path / "origen.db"), _sqlite(tmp_path / "destino.db")
+    with Session(src) as db:
+        db.add(Device(hostname="PC-01"))
+        audit.record(db, "t@asserta.test", "device.create", "device", 1, "PC-01")
+        db.commit()
+    with Session(dst) as db:  # restos del worker sobre la base vacía
+        audit.record(db, "system:scheduler", "run.enqueue", "inventory_run", 1, "intune (schedule)")
+        db.add(AppSetting(key="worker.heartbeat", value={"at": "2026-11-09T10:00:00"}))
+        db.commit()
+    assert any("--reset" in p for p in check(src, dst))
+    assert check(src, dst, reset=True) == []
+    copy(src, dst, log=lambda *_: None, reset=True)
+    assert verify(src, dst) == []  # incluye la cadena de auditoría: solo quedan los eventos del origen
+    with Session(dst) as db:
+        assert [e.action for e in db.execute(select(AuditEvent)).scalars()] == ["device.create"]
+    # Con inventario real en el destino, --reset se niega.
+    assert any("inventario real" in p for p in check(src, dst, reset=True))
