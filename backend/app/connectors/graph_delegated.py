@@ -31,10 +31,21 @@ SCOPE = ("https://graph.microsoft.com/DeviceManagementManagedDevices.Read.All "
          "https://graph.microsoft.com/DeviceManagementConfiguration.Read.All "
          "https://graph.microsoft.com/DeviceManagementManagedDevices.PrivilegedOperations.All "
          "offline_access openid profile")
-# Renovación: .default devuelve los permisos ya concedidos, así una sesión iniciada antes de ampliar
-# SCOPE no falla por falta de consentimiento (solo carecerá de los permisos nuevos).
-REFRESH_SCOPE = "https://graph.microsoft.com/.default offline_access"
+# Solo lectura: respaldo para sesiones iniciadas antes de ampliar SCOPE (sin consentimiento de los
+# permisos nuevos). Nunca se usa .default: con este cliente compartido devolvería todos los permisos
+# que alguien haya concedido alguna vez a Graph PowerShell en el tenant.
+READ_SCOPE = "https://graph.microsoft.com/DeviceManagementManagedDevices.Read.All offline_access openid profile"
+CONSENT_REQUIRED = 65001  # AADSTS65001: falta el consentimiento de algún permiso pedido
 LOGIN = "https://login.microsoftonline.com"
+
+
+def _consent_missing(resp: httpx.Response) -> bool:
+    """AADSTS65001 o suberror consent_required (solo se miran códigos, nunca el texto)."""
+    try:
+        body = resp.json()
+    except ValueError:
+        return False
+    return CONSENT_REQUIRED in (body.get("error_codes") or []) or body.get("suberror") == "consent_required"
 
 
 def _account(id_token: str | None) -> dict[str, str]:
@@ -221,12 +232,14 @@ class DelegatedTokenProvider:
             raise ConnectorError("No hay sesión de Microsoft iniciada para Intune. Conéctese desde Sincronización.",
                                  kind="config")
         tenant = saved.get("tenant_id") or "organizations"
-        try:
-            resp = self.http.post(f"{LOGIN}/{tenant}/oauth2/v2.0/token", data={
-                "grant_type": "refresh_token", "client_id": CLIENT_ID, "refresh_token": saved["refresh_token"],
-                "scope": REFRESH_SCOPE})
-        except httpx.HTTPError as exc:
-            raise ConnectorError(f"No se pudo contactar con Entra ID: {type(exc).__name__}", kind="network") from exc
+        read_only = saved.get("scopes") == "read"
+        resp = self._refresh(tenant, saved["refresh_token"], READ_SCOPE if read_only else SCOPE)
+        if resp.status_code != 200 and not read_only and _consent_missing(resp):
+            # Sesión anterior a la ampliación de permisos: sigue en solo lectura hasta que se reconecte.
+            resp = self._refresh(tenant, saved["refresh_token"], READ_SCOPE)
+            if resp.status_code == 200:
+                saved = {**saved, "scopes": "read"}
+                self.store.save(saved)
         if resp.status_code != 200:
             code = _error_code(resp)
             if code in ("invalid_grant", "interaction_required"):
@@ -239,3 +252,11 @@ class DelegatedTokenProvider:
         self._token = body["access_token"]
         self._exp = time.time() + int(body.get("expires_in", 3600))
         return self._token
+
+    def _refresh(self, tenant: str, refresh_token: str, scope: str) -> httpx.Response:
+        try:
+            return self.http.post(f"{LOGIN}/{tenant}/oauth2/v2.0/token", data={
+                "grant_type": "refresh_token", "client_id": CLIENT_ID, "refresh_token": refresh_token,
+                "scope": scope})
+        except httpx.HTTPError as exc:
+            raise ConnectorError(f"No se pudo contactar con Entra ID: {type(exc).__name__}", kind="network") from exc

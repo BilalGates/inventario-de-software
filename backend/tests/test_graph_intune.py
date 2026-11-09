@@ -2,6 +2,7 @@ import httpx
 import pytest
 
 from app.connectors.base import ConnectorError
+from app.connectors.graph import GraphClient
 from app.connectors.intune import IntuneConnector, map_device
 from tests.fakes import FakeGraph, device
 
@@ -125,3 +126,30 @@ def test_per_device_does_not_trust_empty_lists():
     assert result.installs[0].publisher == "x"  # el editor sale del catálogo, no del $expand de beta
     assert all(i.source_app_id != "pkg-sistema" for i in result.installs)
     assert sum(c.startswith("GET /beta/deviceManagement/managedDevices/") for c in fake.calls) == 2  # una por equipo
+
+
+def test_actions_are_not_retried():
+    fake = FakeGraph([device(1)], {})
+    fake.fail = lambda req: httpx.Response(503) if req.method == "POST" else None
+    with pytest.raises(ConnectorError):
+        fake.client().post("/v1.0/deviceManagement/managedDevices/intune-1/syncDevice")
+    assert sum(c.startswith("POST /v1.0") for c in fake.calls) == 1
+
+
+def test_action_timeout_is_reported_as_uncertain():
+    def handler(req):
+        if req.method == "POST" and req.url.host == "graph.microsoft.com":
+            raise httpx.ReadTimeout("lento", request=req)
+        return httpx.Response(200, json={"access_token": "tok", "expires_in": 3600})
+
+    client = GraphClient("t", "c", "s", http=httpx.Client(transport=httpx.MockTransport(handler)),
+                         sleep=lambda s: None)
+    with pytest.raises(ConnectorError, match="incierto"):
+        client.post("/v1.0/deviceManagement/managedDevices/x/windowsDefenderScan", json={"quickScan": True})
+    assert client.request_count == 1
+
+
+def test_action_with_non_json_body_is_accepted():
+    fake = FakeGraph([device(1)], {})
+    fake.fail = lambda req: httpx.Response(202, text="Accepted") if req.method == "POST" else None
+    assert fake.client().post("/v1.0/deviceManagement/managedDevices/intune-1/syncDevice") == {}
