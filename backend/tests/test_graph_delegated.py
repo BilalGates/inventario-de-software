@@ -200,3 +200,38 @@ def test_worker_uses_cloud_session_and_saves_rotated_token(engine, monkeypatch):
                                                                  "expires_in": 3600}))
     assert provider() == "at"
     assert graph_session.saved_session()["refresh_token"] == "rt-2"  # rotado y guardado para la próxima
+
+
+def test_connect_asks_read_only_by_default_and_full_on_demand(engine):
+    asked = []
+
+    def handler(req):
+        if req.url.path.endswith("/devicecode"):
+            asked.append(_scopes(req))
+            return httpx.Response(200, json={"device_code": "dc", "user_code": "X", "expires_in": 900,
+                                             "interval": 0, "verification_uri": "https://microsoft.com/devicelogin"})
+        return httpx.Response(200, json={"access_token": "at", "refresh_token": "rt", "id_token": ID_TOKEN})
+
+    store = _store()
+    login = DeviceCodeLogin(store, _http(handler))
+    login.start()
+    login.poll()
+    assert asked == [READ_SCOPE] and store.load()["scopes"] == "read"
+    login.start(full=True)
+    login.poll()
+    assert asked[-1] == SCOPE and store.load()["scopes"] == "full"
+
+
+def test_denied_full_consent_keeps_previous_session(engine):
+    def handler(req):
+        if req.url.path.endswith("/devicecode"):
+            return httpx.Response(200, json={"device_code": "dc", "user_code": "X", "expires_in": 900,
+                                             "interval": 0, "verification_uri": "https://microsoft.com/devicelogin"})
+        return httpx.Response(400, json={"error": "access_denied"})
+
+    store = _store()
+    store.save({"refresh_token": "rt-lectura", "scopes": "read"})
+    login = DeviceCodeLogin(store, _http(handler))
+    login.start(full=True)
+    assert login.poll()["status"] == "error"
+    assert store.load()["refresh_token"] == "rt-lectura"
