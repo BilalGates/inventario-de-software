@@ -136,3 +136,22 @@ def test_vercel_with_entra_starts(monkeypatch):
     s = Settings(auth_mode="entra", environment="production", entra_tenant_id="t", entra_api_client_id="a",
                  database_url="postgresql://u:p@h:6543/postgres")
     assert s.serverless is True
+
+
+def test_copy_database_replaces_users_created_by_login(tmp_path):
+    """Entrar en la web antes de copiar crea una fila en «users»: no debe bloquear la copia."""
+    from app.models import User
+
+    src, dst = _sqlite(tmp_path / "origen.db"), _sqlite(tmp_path / "destino.db")
+    with Session(src) as db:
+        db.add_all([User(upn="bilal@asserta.net", display_name="Bilal", source="entra", role="admin"),
+                    User(upn="elena@asserta.net", display_name="Elena", source="entra", role="auditor")])
+        db.commit()
+    with Session(dst) as db:  # lo que deja el primer inicio de sesión en Supabase
+        db.add(User(upn="bilal@asserta.net", display_name="Bilal El Arbi", source="entra", role="admin"))
+        db.commit()
+    assert check(src, dst) == []
+    copy(src, dst, log=lambda *_: None)
+    assert verify(src, dst) == []
+    with Session(dst) as db:
+        assert sorted(db.execute(select(User.upn)).scalars()) == ["bilal@asserta.net", "elena@asserta.net"]
