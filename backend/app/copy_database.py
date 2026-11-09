@@ -29,6 +29,8 @@ CHUNK = 500
 # Lo que la API escribe sola en una base recién creada: datos de referencia al arrancar y una fila
 # en «users» por cada inicio de sesión. Se borra en el destino y se copia del origen.
 REPLACEABLE = ("users", "app_settings", "inventory_sources", "device_types")
+# Con --reset se vacía el destino entero, pero solo si no contiene inventario real.
+INVENTORY_TABLES = ("devices", "software_products", "inventory_snapshots")
 
 
 def _revision(engine: Engine) -> str | None:
@@ -44,8 +46,11 @@ def _counts(engine: Engine) -> dict[str, int]:
         return {t.name: c.execute(select(func.count()).select_from(t)).scalar() or 0 for t in Base.metadata.sorted_tables}
 
 
-def check(source: Engine, target: Engine) -> list[str]:
-    """Problemas que impiden copiar. Lista vacía = se puede copiar."""
+def check(source: Engine, target: Engine, reset: bool = False) -> list[str]:
+    """Problemas que impiden copiar. Lista vacía = se puede copiar.
+
+    reset=True admite un destino con datos de prueba (p. ej. ejecuciones del worker sobre la base
+    vacía): se borrarán. Nunca si el destino ya tiene equipos, software o inventarios mensuales."""
     problems = []
     src_rev, dst_rev = _revision(source), _revision(target)
     if dst_rev is None:
@@ -56,9 +61,14 @@ def check(source: Engine, target: Engine) -> list[str]:
         busy = {k: v for k, v in _counts(target).items() if v}
         # La API crea datos de referencia al arrancar y una fila en «users» por cada inicio de sesión:
         # se aceptan (y se sustituyen por los del origen) solo si el destino no tiene nada más.
-        reference = set(REPLACEABLE)
-        if set(busy) - reference:
-            problems.append(f"El destino ya tiene datos: {', '.join(f'{k}={v}' for k, v in busy.items())}.")
+        if reset:
+            real = {k: v for k, v in busy.items() if k in INVENTORY_TABLES}
+            if real:
+                problems.append("El destino tiene inventario real y no se vaciará: "
+                                f"{', '.join(f'{k}={v}' for k, v in real.items())}.")
+        elif set(busy) - set(REPLACEABLE):
+            problems.append(f"El destino ya tiene datos: {', '.join(f'{k}={v}' for k, v in busy.items())}. "
+                            "Si son solo pruebas (p. ej. el worker ejecutado antes de copiar), use --reset.")
     # PostgreSQL hace cumplir la longitud de VARCHAR; SQLite no.
     with source.connect() as c:
         for table in Base.metadata.sorted_tables:
@@ -87,11 +97,13 @@ def _batches(conn, table) -> Iterable[list[dict]]:
         offset += len(rows)
 
 
-def copy(source: Engine, target: Engine, log=print) -> dict[str, int]:
+def copy(source: Engine, target: Engine, log=print, reset: bool = False) -> dict[str, int]:
     copied: dict[str, int] = {}
     with source.connect() as src, target.begin() as dst:
-        for name in REPLACEABLE:
-            dst.execute(Base.metadata.tables[name].delete())
+        # reset: todo el destino (de hijas a padres); si no, solo lo que la API crea sola.
+        tables = reversed(Base.metadata.sorted_tables) if reset else (Base.metadata.tables[n] for n in REPLACEABLE)
+        for table in tables:
+            dst.execute(table.delete())
         for table in Base.metadata.sorted_tables:
             self_fks = [fk.parent.name for fk in table.foreign_keys if fk.column.table is table]
             pk = [c.name for c in table.primary_key.columns]
@@ -138,18 +150,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--source", required=True, help="URL de origen, p. ej. sqlite:///C:/…/inventario.db")
     parser.add_argument("--target", required=True, help="URL de destino (Supabase: pooler de sesión, puerto 5432)")
     parser.add_argument("--check", action="store_true", help="Solo comprobar, sin escribir")
+    parser.add_argument("--reset", action="store_true",
+                        help="Vaciar antes el destino (solo si no tiene equipos, software ni inventarios mensuales)")
     args = parser.parse_args(argv)
     source, target = make_engine(args.source), make_engine(args.target)
     print("Comprobando…")
-    problems = check(source, target)
+    problems = check(source, target, reset=args.reset)
     if problems:
         print("No se puede copiar:\n- " + "\n- ".join(problems))
         return 1
     if args.check:
         print("Todo correcto: se puede copiar.")
         return 0
-    print("Copiando…")
-    copy(source, target)
+    print("Vaciando el destino y copiando…" if args.reset else "Copiando…")
+    copy(source, target, reset=args.reset)
     print("Verificando…")
     problems = verify(source, target)
     if problems:
