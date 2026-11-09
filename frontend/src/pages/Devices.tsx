@@ -10,7 +10,7 @@ import { Meter, fmtPct, pct } from "@/components/viz";
 import { useDashboard, type DashboardData } from "@/lib/dashboard";
 import { api } from "@/lib/api";
 import { useCan } from "@/lib/auth";
-import { SOURCE_LABEL, fmtBytes, fmtRelative, osFamily } from "@/lib/format";
+import { SOURCE_LABEL, fmtBytes, fmtRelative, isFailing, osFamily } from "@/lib/format";
 import { useAction, useUrlState } from "@/lib/hooks";
 import { useDepartments, useDeviceTypes } from "@/lib/queries";
 import type { DeviceDetail, DeviceRow, Paged } from "@/lib/types";
@@ -40,7 +40,7 @@ const columns: Column<DeviceRow>[] = [
   { id: "compliance", header: "Cumplimiento", cell: (d) => (
     <div className="flex flex-col items-start gap-0.5">
       <ComplianceBadge value={d.compliance_state} reasons={d.compliance_reasons} />
-      {d.compliance_state !== "compliant" && d.compliance_reasons?.[0] && (
+      {isFailing(d.compliance_state) && d.compliance_reasons?.[0] && (
         <span className="block max-w-44 truncate text-2xs text-muted" title={d.compliance_reasons.join(" · ")}>
           {d.compliance_reasons[0]}{d.compliance_reasons.length > 1 ? ` +${d.compliance_reasons.length - 1}` : ""}
         </span>

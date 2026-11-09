@@ -52,3 +52,13 @@ def make_client():
     return GraphClient(s.graph_tenant_id, s.graph_client_id, s.graph_client_secret, s.graph_certificate_path,
                        s.graph_certificate_thumbprint, s.graph_base_url, s.graph_max_retries,
                        token_provider=provider)
+
+
+def intune_api_version(db) -> str:
+    """Versión de Graph configurada en la fuente Intune (la misma que usa la sincronización)."""
+    from sqlalchemy import select
+
+    from app.models import InventorySource
+
+    src = db.execute(select(InventorySource).where(InventorySource.code == "intune")).scalar_one_or_none()
+    return ((src.config or {}) if src else {}).get("api_version", "v1.0")

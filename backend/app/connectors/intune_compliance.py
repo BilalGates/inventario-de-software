@@ -114,8 +114,11 @@ def fetch_compliance(client: GraphClient, intune_id: str, api_version: str = "v1
     return {"policies": policies}
 
 
-def reasons(details: dict | None, limit: int = 4) -> list[str]:
-    """Motivos cortos para la tabla (texto de cada ajuste o, si no hay detalle, la directiva)."""
+def reasons(details: dict | None, state: str | None, limit: int = 4) -> list[str]:
+    """Motivos cortos para la tabla (texto de cada ajuste o, si no hay detalle, la directiva). Solo
+    con un estado en fallo: un motivo guardado nunca se muestra junto a un estado que ya no falla."""
+    if _norm(state) not in DEVICE_FAILING:
+        return []
     out: list[str] = []
     for p in (details or {}).get("policies", []):
         labels = [s["label"] for s in p.get("settings", [])] or [p.get("name")]

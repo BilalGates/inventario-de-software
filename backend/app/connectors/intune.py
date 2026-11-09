@@ -164,23 +164,23 @@ class IntuneConnector:
 
     def _compliance_details(self, result: ExtractResult, log) -> None:
         """Motivo de la no conformidad, solo en los equipos que fallan (pocas llamadas). No es esencial:
-        sin el permiso DeviceManagementConfiguration.Read.All se avisa y se sigue."""
+        sin permiso o sin sesión válida se avisa y se sigue con el software."""
         failing = [d for d in result.devices if (d.compliance_state or "").lower() in DEVICE_FAILING]
         for dev in result.devices:
-            if (dev.compliance_state or "").lower() == "compliant":
-                dev.compliance_details = {"policies": []}  # conforme: se limpia el motivo anterior
+            if (dev.compliance_state or "").lower() not in DEVICE_FAILING:
+                dev.compliance_details = {"policies": []}  # ya no falla: se limpia el motivo anterior
         failures = 0
         for dev in failing:
             try:
                 dev.compliance_details = fetch_compliance(self.client, dev.key, self.api.strip("/"))
+                dev.compliance_checked = True
             except ConnectorError as exc:
-                if exc.kind == "permission":
-                    result.warnings.append("Sin permiso para leer el detalle de conformidad "
-                                           "(DeviceManagementConfiguration.Read.All); vuelva a conectar Intune.")
+                if exc.kind in ("permission", "auth"):
+                    result.warnings.append("No se pudo leer el detalle de conformidad (falta el permiso "
+                                           "DeviceManagementConfiguration.Read.All o la sesión no es válida); "
+                                           "vuelva a conectar Intune.")
                     log(result.warnings[-1])
                     return
-                if exc.kind == "auth":
-                    raise
                 failures += 1
         if failing:
             log(f"Intune: detalle de conformidad de {len(failing) - failures}/{len(failing)} equipos no conformes.")

@@ -173,3 +173,7 @@ export function fmtPeriod(p: string): string {
   const text = new Intl.DateTimeFormat("es-ES", { month: "long", year: "numeric" }).format(new Date(y, m - 1, 1));
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
+
+const COMPLIANCE_FAILING = new Set(["noncompliant", "error", "conflict", "ingraceperiod"]);
+/** Estados de Intune que explican un «No conforme» (unknown, notApplicable… no son un fallo). */
+export const isFailing = (state: string | null | undefined) => COMPLIANCE_FAILING.has((state ?? "").toLowerCase());
