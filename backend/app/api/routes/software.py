@@ -377,7 +377,7 @@ class PolicyIn(BaseModel):
     scope: str = Field(..., pattern="^(global|department|device)$")
     department_id: int | None = None
     device_id: int | None = None
-    status: str = Field(..., pattern="^(authorized|unauthorized|pending_review|exception)$")
+    status: str = Field(..., pattern="^(authorized|conditional|unauthorized|pending_review|exception)$")
     justification: str | None = Field(None, max_length=2000)
     approved_by: str | None = Field(None, max_length=255)
     valid_until: datetime | None = None

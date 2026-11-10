@@ -25,7 +25,7 @@ from app.models import Department, Device, SoftwareInstallation, SoftwareProduct
 
 CATEGORY_LABEL = {"application": "Aplicación", "system_component": "Componente del sistema", "driver": "Controlador",
                   "runtime": "Runtime / librería", "update": "Actualización", "unknown": "Desconocido"}
-AUTH_LABEL = {"authorized": "Autorizado", "unauthorized": "No autorizado", "pending_review": "Pendiente de revisión",
+AUTH_LABEL = {"authorized": "Autorizado", "conditional": "Condicionado", "unauthorized": "No autorizado", "pending_review": "Pendiente de revisión",
               "exception": "Excepción aprobada", "unclassified": "No clasificado"}
 DEVICE_STATUS_LABEL = {"active": "En uso", "in_stock": "En almacén", "repair": "En reparación",
                        "retired": "Dado de baja", "lost": "Perdido / robado"}

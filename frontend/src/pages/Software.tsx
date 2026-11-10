@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Download, Tags } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { AuthBadge } from "@/components/badges";
 import { DataTable, type Column } from "@/components/DataTable";
@@ -52,13 +52,14 @@ function columns(fleet: number): Column<Product>[] {
 const STATUS_TABS = [
   { id: "all", label: "Todo", status: null },
   { id: "authorized", label: "Autorizado", status: "authorized" },
+  { id: "conditional", label: "Condicionado", status: "conditional" },
   { id: "pending", label: "Por clasificar", status: "unclassified,pending_review" },
   { id: "unauthorized", label: "No autorizado", status: "unauthorized" },
   { id: "exception", label: "Excepciones", status: "exception" },
 ] as const;
 
 /** Cola de clasificación rápida (panel oscuro): autoriza o rechaza lo más instalado de lo pendiente. */
-function ClassifyQueue({ data, canWrite }: { data: DashboardData; canWrite: boolean }) {
+function ClassifyQueue({ data, canWrite, onShowAll }: { data: DashboardData; canWrite: boolean; onShowAll: () => void }) {
   const queue = data.software.queue ?? [];
   const [rejecting, setRejecting] = useState<RankedProduct | null>(null);
   const decide = useAction(({ id, status }: { id: number; status: string }) => api.send<{ updated: number }>("POST", "/software/bulk-update",
@@ -95,8 +96,9 @@ function ClassifyQueue({ data, canWrite }: { data: DashboardData; canWrite: bool
         </ul>
       )}
       {data.software.pending > queue.length && (
-        <Link to="/software?status=unclassified,pending_review" className="mt-auto text-xs text-[#D6D3CF] underline decoration-[#5E5954] underline-offset-4 hover:decoration-[#D6D3CF]">
-          Ver los {data.software.pending} pendientes</Link>
+        <button type="button" onClick={onShowAll}
+          className="mt-auto self-start text-xs text-[#D6D3CF] underline decoration-[#5E5954] underline-offset-4 hover:decoration-[#D6D3CF]">
+          Ver los {data.software.pending} pendientes</button>
       )}
       <ConfirmDialog open={!!rejecting} onClose={() => setRejecting(null)} title="Marcar como no autorizado" danger
         confirmLabel="No autorizar" busy={decide.isPending}
@@ -107,7 +109,7 @@ function ClassifyQueue({ data, canWrite }: { data: DashboardData; canWrite: bool
   );
 }
 
-function SoftwareSummary({ data, canWrite }: { data: DashboardData; canWrite: boolean }) {
+function SoftwareSummary({ data, canWrite, onShowPending }: { data: DashboardData; canWrite: boolean; onShowPending: () => void }) {
   const sw = data.software;
   const auth = sw.by_status.authorized ?? 0;
   return (
@@ -125,7 +127,7 @@ function SoftwareSummary({ data, canWrite }: { data: DashboardData; canWrite: bo
           aside={<span className="text-[13px] text-muted">equipos con la aplicación, de {data.devices.total}</span>}>
           <RankedList items={sw.top ?? []} total={data.devices.total} />
         </Panel>
-        <ClassifyQueue data={data} canWrite={canWrite} />
+        <ClassifyQueue data={data} canWrite={canWrite} onShowAll={onShowPending} />
       </div>
     </div>
   );
@@ -136,6 +138,12 @@ export default function Software() {
   const { values, set, page } = useUrlState(["q", "sort", "status", "category", "relevant", "department_id", "view"] as const);
   const [selected, setSelected] = useState<Set<number | string>>(new Set());
   const [classifying, setClassifying] = useState(false);
+  const tableRef = useRef<HTMLDivElement>(null);
+  // Mismo filtro que la URL actual no navega: además de filtrar, se lleva al usuario a la tabla.
+  const showPending = () => {
+    set({ status: "unclassified,pending_review" });
+    tableRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
   const depts = useDepartments().data?.items ?? [];
   const view = (values.view ?? "all") as keyof typeof VIEWS;
   const relevant = values.relevant ?? "true";
@@ -150,7 +158,7 @@ export default function Software() {
   const tab = STATUS_TABS.find((t) => (t.status ?? "") === (values.status ?? ""))?.id ?? "all";
   const by = dash?.software.by_status ?? {};
   const tabCount: Record<string, number> | undefined = dash && {
-    all: dash.software.products, authorized: by.authorized ?? 0, pending: dash.software.pending,
+    all: dash.software.products, authorized: by.authorized ?? 0, conditional: by.conditional ?? 0, pending: dash.software.pending,
     unauthorized: by.unauthorized ?? 0, exception: by.exception ?? 0,
   };
 
@@ -164,10 +172,11 @@ export default function Software() {
             onClick={() => api.download("/software/export", { format: "xlsx", q: values.q, status: values.status,
               category: values.category, relevant: params.relevant, department_id: values.department_id })}>Excel por departamento</Button>
           {can.write && !!dash?.software.pending && (
-            <Button variant="primary" onClick={() => set({ status: "unclassified,pending_review" })}>Clasificar pendientes</Button>
+            <Button variant="primary" onClick={showPending}>Clasificar pendientes</Button>
           )}
         </>} />
-      {dash && <SoftwareSummary data={dash} canWrite={can.write} />}
+      {dash && <SoftwareSummary data={dash} canWrite={can.write} onShowPending={showPending} />}
+      <div ref={tableRef} className="scroll-mt-20">
       <DataTable
         header={<Tabs bare label="Autorización" value={tab} onChange={(id) => set({ status: STATUS_TABS.find((t) => t.id === id)?.status ?? null })}
           tabs={STATUS_TABS.map((t) => ({ id: t.id, label: t.label, count: tabCount?.[t.id] }))} />}
@@ -193,6 +202,7 @@ export default function Software() {
           </select>
         </>}
       />
+      </div>
       {classifying && <BulkClassify ids={[...selected].map(Number)} onClose={() => setClassifying(false)}
         onDone={() => { setClassifying(false); setSelected(new Set()); }} />}
     </>
@@ -221,7 +231,7 @@ function BulkClassify({ ids, onClose, onDone }: { ids: number[]; onClose: () => 
         <Field label="Autorización global" hint="Las excepciones se conceden por departamento o dispositivo desde la ficha del producto.">
           {(id) => <select id={id} className="field" value={status} onChange={(e) => setStatus(e.target.value)}>
             <option value="">Sin cambios</option>
-            {["authorized", "unauthorized", "pending_review", "unclassified"].map((s) => <option key={s} value={s}>{AUTH_LABEL[s]}</option>)}
+            {["authorized", "conditional", "unauthorized", "pending_review", "unclassified"].map((s) => <option key={s} value={s}>{AUTH_LABEL[s]}</option>)}
           </select>}
         </Field>
         <Field label="Categoría">

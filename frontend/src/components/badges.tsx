@@ -20,7 +20,7 @@ export function StatusText({ mark, children, title }: { mark: Mark; children: st
 }
 
 const AUTH_MARK: Record<string, Mark> = {
-  authorized: "ink", unauthorized: "signal", pending_review: "hollow", exception: "muted", unclassified: "hollow",
+  authorized: "ink", conditional: "muted", unauthorized: "signal", pending_review: "hollow", exception: "muted", unclassified: "hollow",
 };
 export const AuthBadge = ({ status }: { status: string }) => (
   <StatusText mark={AUTH_MARK[status] ?? "muted"}>{AUTH_LABEL[status] ?? status}</StatusText>
