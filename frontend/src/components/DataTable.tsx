@@ -1,5 +1,6 @@
 import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, Columns3, Search } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { Button, EmptyState, ErrorState, Spinner, cx } from "./ui";
 
 export interface Column<T> {
@@ -55,8 +56,10 @@ function readHidden(key: string | undefined, cols: Column<unknown>[]): Set<strin
 export function DataTable<T>(p: Props<T>) {
   const [hidden, setHidden] = useState<Set<string>>(() => readHidden(p.storageKey, p.columns as Column<unknown>[]));
   const [showCols, setShowCols] = useState(false);
+  const [menuPos, setMenuPos] = useState<CSSProperties>();
   const [q, setQ] = useState(p.search ?? "");
   const colsRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const visible = useMemo(() => p.columns.filter((c) => !hidden.has(c.id)), [p.columns, hidden]);
 
   useEffect(() => {
@@ -67,9 +70,35 @@ export function DataTable<T>(p: Props<T>) {
 
   useEffect(() => {
     if (!showCols) return;
-    const close = (e: MouseEvent) => !colsRef.current?.contains(e.target as Node) && setShowCols(false);
+    // El menú se pinta fuera de la tarjeta (que recorta su contenido) y se coloca bajo el botón.
+    const place = () => {
+      const r = colsRef.current?.getBoundingClientRect();
+      if (!r) return;
+      const below = window.innerHeight - r.bottom - 12;
+      const above = r.top - 12;
+      const up = below < 240 && above > below;
+      setMenuPos({
+        position: "fixed", right: Math.max(8, window.innerWidth - r.right),
+        ...(up ? { bottom: window.innerHeight - r.top + 4 } : { top: r.bottom + 4 }),
+        maxHeight: Math.max(160, up ? above : below),
+      });
+    };
+    place();
+    const close = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (!colsRef.current?.contains(t) && !menuRef.current?.contains(t)) setShowCols(false);
+    };
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setShowCols(false);
     document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
+    document.addEventListener("keydown", onKey);
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", onKey);
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
+    };
   }, [showCols]);
 
   const toggleCol = (id: string) => {
@@ -142,15 +171,17 @@ export function DataTable<T>(p: Props<T>) {
               onClick={() => setShowCols((v) => !v)}>
               Columnas
             </Button>
-            {showCols && (
-              <div className="absolute right-0 z-20 mt-1 w-56 rounded-md border border-border bg-surface p-1.5 shadow-[0_8px_24px_rgb(0_0_0/0.08)]">
+            {showCols && menuPos && createPortal(
+              <div ref={menuRef} style={menuPos}
+                className="z-50 w-56 overflow-y-auto overscroll-contain rounded-md border border-border bg-surface p-1.5 text-[13px] shadow-[0_8px_24px_rgb(0_0_0/0.12)]">
                 {p.columns.map((c) => (
                   <label key={c.id} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 hover:bg-subtle">
                     <input type="checkbox" checked={!hidden.has(c.id)} onChange={() => toggleCol(c.id)} />
                     {c.header}
                   </label>
                 ))}
-              </div>
+              </div>,
+              document.body,
             )}
           </div>
         </div>
