@@ -11,17 +11,17 @@ import {
   Package,
   PanelLeft,
   RefreshCw,
-  Search,
   Settings,
   Sun,
   X,
   type LucideIcon,
 } from "lucide-react";
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
-import { NavLink, useLocation, useNavigate } from "react-router-dom";
+import { useEffect, useState, type ReactNode } from "react";
+import { NavLink, useLocation } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { ROLE_LABEL } from "@/lib/format";
+import { GlobalSearch } from "./GlobalSearch";
 import { cx } from "./ui";
 
 interface NavItem { to: string; label: string; icon: LucideIcon; end?: boolean }
@@ -132,9 +132,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [dark, toggleTheme] = useTheme();
   const [open, setOpen] = useState(false);
   const [expanded, setExpanded] = useState(() => readPref("sidebar.expanded", false));
-  const [q, setQ] = useState("");
   const location = useLocation();
-  const navigate = useNavigate();
   useEffect(() => setOpen(false), [location.pathname]);
   const { data: alerts } = useQuery({
     queryKey: ["alerts-count"],
@@ -144,11 +142,6 @@ export function AppShell({ children }: { children: ReactNode }) {
   const toggleSidebar = () => {
     writePref("sidebar.expanded", !expanded);
     setExpanded(!expanded);
-  };
-  const search = (e: FormEvent) => {
-    e.preventDefault();
-    const term = q.trim();
-    navigate(term ? `/dispositivos?q=${encodeURIComponent(term)}` : "/dispositivos");
   };
   const displayName = me.name ?? me.upn;
   const iconBtn = "relative inline-flex size-10 items-center justify-center rounded-md text-muted transition-colors hover:bg-bg hover:text-fg";
@@ -177,15 +170,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <button onClick={() => setOpen(true)} className={cx(iconBtn, "lg:hidden")} aria-label="Abrir menú">
             <Menu className="size-5" />
           </button>
-          <form role="search" onSubmit={search} className="flex min-w-0 max-w-md flex-1">
-            <label htmlFor="global-search" className="sr-only">Buscar equipos</label>
-            <div className="flex h-10 w-full items-center gap-2.5 rounded-md border border-border-strong px-3 text-muted focus-within:border-fg">
-              <Search className="size-4 shrink-0" aria-hidden />
-              <input id="global-search" type="search" value={q} onChange={(e) => setQ(e.target.value)}
-                placeholder="Equipo, usuario o n.º de serie"
-                className="min-w-0 flex-1 bg-transparent text-[13px] text-fg outline-none placeholder:text-muted" />
-            </div>
-          </form>
+          <GlobalSearch />
           <div className="ml-auto flex items-center gap-1">
             <button onClick={toggleTheme} className={iconBtn} aria-label={dark ? "Usar tema claro" : "Usar tema oscuro"}>
               {dark ? <Sun className="size-[18px]" strokeWidth={1.6} /> : <Moon className="size-[18px]" strokeWidth={1.6} />}
