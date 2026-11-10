@@ -45,6 +45,7 @@ export const fmtNumber = (n: number | null | undefined) => (n == null ? "—" : 
 
 export const AUTH_LABEL: Record<string, string> = {
   authorized: "Autorizado",
+  conditional: "Condicionado",
   unauthorized: "No autorizado",
   pending_review: "Pendiente de revisión",
   exception: "Excepción aprobada",

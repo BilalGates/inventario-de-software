@@ -17,7 +17,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db import Base, utcnow
 
 SOFTWARE_CATEGORIES = ("application", "system_component", "driver", "runtime", "update", "unknown")
-AUTH_STATUSES = ("authorized", "unauthorized", "pending_review", "exception", "unclassified")
+AUTH_STATUSES = ("authorized", "conditional", "unauthorized", "pending_review", "exception", "unclassified")
 
 
 class SoftwareProduct(Base):

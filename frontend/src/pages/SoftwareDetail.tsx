@@ -158,7 +158,7 @@ function EditProduct({ p, onClose }: { p: ProductDetail; onClose: () => void }) 
         <div className="sm:col-span-2"><Field label="Nombre">{(id) => <input id={id} className="field" value={v.name} onChange={(e) => setV({ ...v, name: e.target.value })} />}</Field></div>
         <Field label="Autorización global">{(id) => <select id={id} className="field" value={v.authorization_status}
           onChange={(e) => setV({ ...v, authorization_status: e.target.value })}>
-          {["authorized", "unauthorized", "pending_review", "unclassified"].map((s) => <option key={s} value={s}>{AUTH_LABEL[s]}</option>)}</select>}</Field>
+          {["authorized", "conditional", "unauthorized", "pending_review", "unclassified"].map((s) => <option key={s} value={s}>{AUTH_LABEL[s]}</option>)}</select>}</Field>
         <Field label="Categoría">{(id) => <select id={id} className="field" value={v.category} onChange={(e) => setV({ ...v, category: e.target.value })}>
           {Object.entries(CATEGORY_LABEL).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>}</Field>
         <Field label="Clasificación ENS">{(id) => <input id={id} className="field" value={v.ens_classification} onChange={(e) => setV({ ...v, ens_classification: e.target.value })} />}</Field>
@@ -196,7 +196,7 @@ function PolicyDialog({ product, onClose }: { product: ProductDetail; onClose: (
             onChange={(e) => setV({ ...v, scope: e.target.value, status: e.target.value === "global" && v.status === "exception" ? "authorized" : v.status })}>
             <option value="global">Global</option><option value="department">Departamento</option><option value="device">Dispositivo</option></select>}</Field>
           <Field label="Estado">{(id) => <select id={id} className="field" value={v.status} onChange={(e) => setV({ ...v, status: e.target.value })}>
-            {["authorized", "unauthorized", "pending_review", ...(v.scope !== "global" ? ["exception"] : [])].map((s) => <option key={s} value={s}>{AUTH_LABEL[s]}</option>)}</select>}</Field>
+            {["authorized", "conditional", "unauthorized", "pending_review", ...(v.scope !== "global" ? ["exception"] : [])].map((s) => <option key={s} value={s}>{AUTH_LABEL[s]}</option>)}</select>}</Field>
         </div>
         {v.scope === "department" && <Field label="Departamento">{(id) => <select id={id} className="field" value={v.department_id}
           onChange={(e) => setV({ ...v, department_id: e.target.value })}><option value="">Seleccione…</option>

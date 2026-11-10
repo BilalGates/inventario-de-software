@@ -168,6 +168,22 @@ def test_panda_upload_flow_and_software_queries(client, db):
     assert client.get("/api/software", params={"department_id": 999}).json()["total"] == 0
 
 
+def test_conditional_status_leaves_queue_without_alerts(client, db):
+    dev = client.post("/api/devices", json={"hostname": "PC-8"}).json()
+    client.post("/api/runs/upload", data={"source": "panda", "device_id": str(dev["id"])},
+                files={"file": ("export.txt", PANDA.encode("utf-8"), "text/plain")})
+    drain(db)
+    ids = [i["product_id"] for i in client.get(f"/api/devices/{dev['id']}/software").json()["items"]]
+    pending = client.get("/api/dashboard").json()["software"]["pending"]
+    r = client.post("/api/software/bulk-update", json={"product_ids": ids, "authorization_status": "conditional"})
+    assert r.status_code == 200 and r.json()["updated"] == len(ids)
+    dash = client.get("/api/dashboard").json()["software"]
+    assert dash["pending"] == pending - len(ids)
+    assert dash["by_status"]["conditional"] == len(ids)
+    assert client.get("/api/software", params={"status": "conditional"}).json()["total"] == len(ids)
+    assert client.get("/api/alerts", params={"type": "unauthorized_software"}).json()["total"] == 0
+
+
 def test_snapshot_generate_review_compare_and_report(client, db):
     dev = client.post("/api/devices", json={"hostname": "PC-9"}).json()
     client.post("/api/runs/upload", data={"source": "panda", "device_id": str(dev["id"])},

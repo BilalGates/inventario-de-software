@@ -57,7 +57,8 @@ function Activity({ days }: { days: DayActivity[] }) {
 // ------------------------------------------------------------------ Catálogo por estado
 const CATALOG = [
   { key: "authorized", cls: "bg-chart-1" },
-  { key: "exception", cls: "bg-chart-2" },
+  { key: "conditional", cls: "bg-chart-2" },
+  { key: "exception", cls: "bg-chart-2/60" },
   { key: "unauthorized", cls: "bg-signal-fill", alert: true },
   { key: "pending_review", cls: "bg-chart-3" },
   { key: "unclassified", cls: "bg-chart-4 border border-border-strong" },

@@ -85,7 +85,7 @@ export interface DeviceCompliance {
   actions: { code: IntuneAction; label: string }[];
 }
 
-export type AuthStatus = "authorized" | "unauthorized" | "pending_review" | "exception" | "unclassified";
+export type AuthStatus = "authorized" | "conditional" | "unauthorized" | "pending_review" | "exception" | "unclassified";
 
 export interface InstalledSoftware {
   installation_id: number;
