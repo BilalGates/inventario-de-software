@@ -134,6 +134,18 @@ def test_device_crud_retire_and_filters(client):
     assert client.post("/api/devices", json={}).status_code == 422
 
 
+def test_device_cost_purchase_date_and_notes(client):
+    d = client.post("/api/devices", json={"hostname": "SRV-1"}).json()
+    assert d["cost"] is None and d["purchase_date"] is None  # el coste se crea vacío
+    r = client.patch(f"/api/devices/{d['id']}", json={"cost": "1.250 €", "purchase_date": "2024-03-15",
+                                                     "notes": "Servidor de pruebas"})
+    assert r.status_code == 200
+    assert r.json()["cost"] == "1.250 €" and r.json()["purchase_date"].startswith("2024-03-15")
+    row = client.get("/api/devices", params={"q": "SRV-1"}).json()["items"][0]
+    assert (row["cost"], row["notes"]) == ("1.250 €", "Servidor de pruebas")
+    assert client.patch(f"/api/devices/{d['id']}", json={"cost": "x" * 31}).status_code == 422
+
+
 def test_panda_upload_flow_and_software_queries(client, db):
     dev = client.post("/api/devices", json={"hostname": "PC-7"}).json()
     r = client.post("/api/runs/upload", data={"source": "panda", "device_id": str(dev["id"])},

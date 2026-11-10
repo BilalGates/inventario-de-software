@@ -78,6 +78,8 @@ export default function DeviceDetail() {
               ["Departamento", d.department ? <Link className="hover:underline" to={`/departamentos/${d.department_id}`}>{d.department}</Link> : "Sin asignar"],
               ["Usuario principal", d.primary_user ? <span title={d.primary_user_upn ?? ""}>{d.primary_user}</span> : "—"],
               ["Ubicación", d.location],
+              ["Fecha de adquisición", fmtDate(d.purchase_date)],
+              ["Coste", d.cost],
               ["Propiedad", d.ownership],
               ["Alta en inventario", fmtDate(d.first_seen_at ?? d.created_at)],
               ["Baja", d.retired_at ? fmtDate(d.retired_at) : "—"],
@@ -127,7 +129,6 @@ export default function DeviceDetail() {
             </Sourced>],
             ["MAC Wi-Fi", <span key="w" className="font-mono">{d.mac_wifi ?? "—"}</span>],
             ["MAC Ethernet", <span key="e" className="font-mono">{d.mac_ethernet ?? "—"}</span>],
-            ["Fecha de compra", fmtDate(d.purchase_date)],
           ]} />
         </Card>
       )}

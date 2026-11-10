@@ -10,7 +10,7 @@ import { Meter, fmtPct, pct } from "@/components/viz";
 import { useDashboard, type DashboardData } from "@/lib/dashboard";
 import { api } from "@/lib/api";
 import { useCan } from "@/lib/auth";
-import { SOURCE_LABEL, fmtBytes, fmtRelative, isFailing, osFamily } from "@/lib/format";
+import { SOURCE_LABEL, fmtBytes, fmtDate, fmtRelative, isFailing, osFamily } from "@/lib/format";
 import { useAction, useUrlState } from "@/lib/hooks";
 import { useDepartments, useDeviceTypes } from "@/lib/queries";
 import type { DeviceDetail, DeviceRow, Paged } from "@/lib/types";
@@ -64,6 +64,11 @@ const columns: Column<DeviceRow>[] = [
   { id: "seen", header: "Última observación", hidden: true,
     cell: (d) => <span className="whitespace-nowrap text-muted" title={d.last_seen_at ?? ""}>{fmtRelative(d.last_seen_at)}</span> },
   { id: "location", header: "Ubicación", hidden: true, cell: (d) => d.location ?? "—" },
+  { id: "purchase", header: "Fecha de adquisición", hidden: true, cell: (d) => <span className="text-muted">{fmtDate(d.purchase_date)}</span> },
+  { id: "cost", header: "Coste", align: "right", hidden: true, cell: (d) => d.cost ?? "—" },
+  { id: "notes", header: "Observaciones", hidden: true, cell: (d) => (
+    <span className="block max-w-72 truncate text-muted" title={d.notes ?? ""}>{d.notes ?? "—"}</span>
+  ) },
 ];
 
 const OS_ORDER = ["Windows 11", "Windows 10", "Windows Server", "macOS"];
