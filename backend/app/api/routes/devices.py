@@ -71,7 +71,8 @@ def serialize(d: Device, stale_days: int, extra: dict | None = None) -> dict:
         "primary_user_id": d.primary_user_id,
         "primary_user": (d.primary_user.display_name or d.primary_user.upn) if d.primary_user else None,
         "primary_user_upn": d.primary_user.upn if d.primary_user else None,
-        "location": d.location, "compliance_state": d.compliance_state, "encrypted": d.encrypted,
+        "location": d.location, "notes": d.notes, "purchase_date": d.purchase_date, "cost": d.cost,
+        "compliance_state": d.compliance_state, "encrypted": d.encrypted,
         "compliance_reasons": intune_compliance.reasons(d.compliance_details, d.compliance_state),
         "ram_bytes": d.ram_bytes, "storage_total_bytes": d.storage_total_bytes,
         "last_seen_at": d.last_seen_at, "last_seen_source": d.last_seen_source,
@@ -143,7 +144,8 @@ DEVICE_EXPORT_COLUMNS = [
     ("processor", "Procesador"), ("mac_wifi", "MAC Wi-Fi"), ("mac_ethernet", "MAC Ethernet"),
     ("ownership", "Propiedad"), ("management_state", "Gestión"), ("enrolled_at", "Inscripción"),
     ("source_last_sync_at", "Último check-in (fuente)"), ("software_count", "Programas"),
-    ("location", "Ubicación"), ("purchase_date", "Fecha de compra"),
+    ("location", "Ubicación"), ("purchase_date", "Fecha de adquisición"), ("cost", "Coste"),
+    ("notes", "Observaciones"),
     ("last_seen_at", "Última observación"), ("last_seen_source", "Fuente"),
 ]
 

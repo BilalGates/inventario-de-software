@@ -15,6 +15,8 @@ export interface DeviceFormValues {
   status?: string;
   location?: string | null;
   notes?: string | null;
+  purchase_date?: string | null;
+  cost?: string | null;
   department_id?: number | null;
   primary_user_upn?: string | null;
 }
@@ -32,7 +34,8 @@ export function DeviceForm({ open, onClose, initial, onSubmit, busy, title }: {
     manufacturer: initial?.manufacturer ?? "", model: initial?.model ?? "", os_name: initial?.os_name ?? "",
     os_version: initial?.os_version ?? "", device_type_id: initial?.device_type_id ?? null,
     status: initial?.status && initial.status !== "retired" ? initial.status : "active",
-    location: initial?.location ?? "", notes: initial?.notes ?? "", department_id: initial?.department_id ?? null,
+    location: initial?.location ?? "", notes: initial?.notes ?? "",
+    purchase_date: initial?.purchase_date?.slice(0, 10) ?? "", cost: initial?.cost ?? "", department_id: initial?.department_id ?? null,
     primary_user_upn: initial?.primary_user_upn ?? "",
   }));
   const [touched, setTouched] = useState(false);
@@ -99,6 +102,12 @@ export function DeviceForm({ open, onClose, initial, onSubmit, busy, title }: {
         {text("os_name", "Sistema operativo")}
         {text("os_version", "Versión del SO")}
         <div className="sm:col-span-2">{text("location", "Ubicación")}</div>
+        <Field label="Fecha de adquisición">
+          {(id) => <input id={id} type="date" className="field" value={v.purchase_date ?? ""} onChange={set("purchase_date")} />}
+        </Field>
+        <Field label="Coste" hint="Importe con moneda, p. ej. 1.250 €">
+          {(id) => <input id={id} className="field" maxLength={30} value={v.cost ?? ""} onChange={set("cost")} />}
+        </Field>
         <div className="sm:col-span-2">
           <Field label="Observaciones administrativas">
             {(id) => <textarea id={id} rows={3} className="field" value={v.notes ?? ""} onChange={set("notes")} />}

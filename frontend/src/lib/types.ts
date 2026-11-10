@@ -34,6 +34,9 @@ export interface DeviceRow {
   primary_user: string | null;
   primary_user_upn: string | null;
   location: string | null;
+  notes: string | null;
+  purchase_date: string | null;
+  cost: string | null;
   compliance_state: string | null;
   compliance_reasons?: string[];
   encrypted: boolean | null;
@@ -47,7 +50,6 @@ export interface DeviceRow {
 }
 
 export interface DeviceDetail extends DeviceRow {
-  notes: string | null;
   processor: string | null;
   storage_free_bytes: number | null;
   mac_wifi: string | null;
@@ -57,8 +59,6 @@ export interface DeviceDetail extends DeviceRow {
   enrolled_at: string | null;
   first_seen_at: string | null;
   retired_at: string | null;
-  purchase_date: string | null;
-  cost: string | null;
   created_at: string;
   updated_at: string;
   field_sources: Record<string, { source: string; at: string; by?: string }>;
