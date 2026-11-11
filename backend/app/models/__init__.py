@@ -1,3 +1,4 @@
+from app.models.actions import RemoteAction
 from app.models.audit import AuditEvent
 from app.models.devices import Device, DeviceAssignment, DeviceExternalId, DeviceType
 from app.models.inventory import (
@@ -22,6 +23,6 @@ from app.models.software import (
 __all__ = [
     "Alert", "AppSetting", "AuditEvent", "Department", "Device", "DeviceAssignment",
     "DeviceExternalId", "DeviceType", "InventoryChange", "InventoryObservation", "InventoryRun",
-    "InventorySnapshot", "InventorySnapshotItem", "InventorySource", "ReviewCase", "SoftwareAlias",
+    "InventorySnapshot", "InventorySnapshotItem", "InventorySource", "RemoteAction", "ReviewCase", "SoftwareAlias",
     "SoftwareInstallation", "SoftwarePolicy", "SoftwareProduct", "SoftwareVersion", "User",
 ]

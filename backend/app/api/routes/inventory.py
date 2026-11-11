@@ -36,6 +36,7 @@ from app.models import (
     InventorySnapshot,
     InventorySnapshotItem,
     InventorySource,
+    RemoteAction,
     ReviewCase,
     SoftwareInstallation,
     SoftwareProduct,
@@ -173,7 +174,8 @@ def _graph_status() -> dict:
     saved = graph_session.saved_session()
     if saved:
         return {"graph_auth": "delegated", "graph_account": saved.get("account") or None,
-                "graph_read_only": saved.get("scopes") == "read"}
+                "graph_read_only": saved.get("scopes") == "read",
+                "graph_scopes": saved.get("scopes") or "full"}
     return {"graph_auth": None, "graph_account": None}
 
 
@@ -186,13 +188,15 @@ def _login() -> DeviceCodeLogin:
 
 
 @router.post("/sources/intune/connect")
-def intune_connect(full: bool = False, _: CurrentUser = Admin):
+def intune_connect(full: bool = False, level: str | None = Query(None, pattern="^(read|mail|full)$"),
+                   _: CurrentUser = Admin):
     """Inicia sesión con código de dispositivo: el usuario lo introduce en microsoft.com/devicelogin.
-    full=true pide además los permisos de conformidad y acciones remotas (requieren aprobación)."""
+    level=mail añade el envío de avisos por correo; full=true (o level=full) además la conformidad, los
+    scripts de desinstalación y las acciones remotas (requieren aprobación de un administrador global)."""
     if get_settings().graph_app_configured:
         raise HTTPException(409, "Intune ya usa credenciales de aplicación (INV_GRAPH_*).")
     try:
-        return _login().start(full=full)
+        return _login().start(full=full, level=level)
     except ConnectorError as exc:
         raise HTTPException(502, str(exc)) from exc
 
@@ -599,7 +603,23 @@ def list_alerts(page: Page = Depends(), status: str | None = "open,acknowledged"
     sev_order = func.coalesce(func.nullif(Alert.severity, ""), "")
     rows, total = paginate(db, query, page, {"created_at": Alert.created_at, "severity": sev_order},
                            Alert.id.desc())
-    return {"total": total, "items": [_alert(r[0]) for r in rows]}
+    alerts = [r[0] for r in rows]
+    # Última acción (aviso o desinstalación) sobre el equipo y la aplicación de cada alerta.
+    last: dict[tuple, RemoteAction] = {}
+    pairs = {(a.device_id, a.product_id) for a in alerts if a.device_id and a.product_id}
+    if pairs:
+        for ra in db.execute(select(RemoteAction).where(
+                RemoteAction.device_id.in_({d for d, _ in pairs}), RemoteAction.product_id.in_({p for _, p in pairs}))
+                .order_by(RemoteAction.id)).scalars():
+            last[(ra.device_id, ra.product_id)] = ra
+    out = []
+    for a in alerts:
+        item = _alert(a)
+        ra = last.get((a.device_id, a.product_id))
+        item["last_action"] = {"kind": ra.kind, "status": ra.status, "at": ra.requested_at,
+                               "by": ra.requested_by} if ra else None
+        out.append(item)
+    return {"total": total, "items": out}
 
 
 class AlertAction(BaseModel):

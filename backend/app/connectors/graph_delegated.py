@@ -24,17 +24,23 @@ import jwt
 from app.connectors.base import ConnectorError
 
 CLIENT_ID = "14d82eec-204b-4c2f-b7e8-296a70dab67e"  # Microsoft Graph Command Line Tools (app pública de Microsoft)
-# Lectura del inventario + detalle de conformidad (Configuration.Read.All) + acciones remotas
-# (PrivilegedOperations.All: sincronizar, Defender). Una sesión antigua sin estos dos últimos sigue
-# sincronizando; para usarlos hay que volver a conectar.
-SCOPE = ("https://graph.microsoft.com/DeviceManagementManagedDevices.Read.All "
-         "https://graph.microsoft.com/DeviceManagementConfiguration.Read.All "
-         "https://graph.microsoft.com/DeviceManagementManagedDevices.PrivilegedOperations.All "
-         "offline_access openid profile")
-# Solo lectura: respaldo para sesiones iniciadas antes de ampliar SCOPE (sin consentimiento de los
-# permisos nuevos). Nunca se usa .default: con este cliente compartido devolvería todos los permisos
-# que alguien haya concedido alguna vez a Graph PowerShell en el tenant.
-READ_SCOPE = "https://graph.microsoft.com/DeviceManagementManagedDevices.Read.All offline_access openid profile"
+# Niveles de permiso de la sesión (de menos a más). Cada nivel incluye el anterior:
+#   read: lectura del inventario de Intune (no suele requerir aprobación de un administrador).
+#   mail: además enviar correo desde un buzón compartido (Mail.Send.Shared, avisos al usuario).
+#   full: además conformidad (Configuration.Read/ReadWrite: leer motivos y crear scripts de
+#         desinstalación) y acciones remotas (PrivilegedOperations.All). Requiere un administrador global.
+# Nunca se usa .default: con este cliente compartido devolvería todos los permisos que alguien haya
+# concedido alguna vez a Graph PowerShell en el tenant.
+_G = "https://graph.microsoft.com/"
+_BASE = "offline_access openid profile"
+READ_SCOPE = f"{_G}DeviceManagementManagedDevices.Read.All {_BASE}"
+MAIL_SCOPE = f"{_G}DeviceManagementManagedDevices.Read.All {_G}Mail.Send.Shared {_BASE}"
+SCOPE = (f"{_G}DeviceManagementManagedDevices.Read.All {_G}Mail.Send.Shared "
+         f"{_G}DeviceManagementConfiguration.Read.All {_G}DeviceManagementConfiguration.ReadWrite.All "
+         f"{_G}DeviceManagementManagedDevices.PrivilegedOperations.All {_BASE}")
+LEVELS = {"read": READ_SCOPE, "mail": MAIL_SCOPE, "full": SCOPE}
+# Si falta el consentimiento de un nivel, se baja al siguiente (sin perder la sesión).
+FALLBACK = {"full": "mail", "mail": "read"}
 CONSENT_REQUIRED = 65001  # AADSTS65001: falta el consentimiento de algún permiso pedido
 LOGIN = "https://login.microsoftonline.com"
 
@@ -159,11 +165,13 @@ class DeviceCodeLogin:
         else:
             self.pending_store.save(value)
 
-    def start(self, full: bool = False) -> dict[str, Any]:
-        """full=False: solo lectura del inventario (no requiere aprobación de un administrador si ya está
-        concedida en el tenant). full=True: además conformidad y acciones remotas (suelen requerirla).
+    def start(self, full: bool = False, level: str | None = None) -> dict[str, Any]:
+        """Nivel de permisos (ver LEVELS): read por defecto; full=True equivale a level="full".
         Si el inicio ampliado falla, la sesión anterior se conserva: solo se guarda al completarse."""
-        scope = SCOPE if full else READ_SCOPE
+        level = level or ("full" if full else "read")
+        if level not in LEVELS:
+            raise ConnectorError(f"Nivel de permisos desconocido: {level}", kind="config")
+        scope = LEVELS[level]
         resp = self._post(f"{LOGIN}/organizations/oauth2/v2.0/devicecode", {"client_id": CLIENT_ID, "scope": scope})
         if resp.status_code != 200:
             raise ConnectorError(f"Entra ID rechazó el inicio de sesión ({_error_code(resp)}).", kind="auth")
@@ -171,7 +179,7 @@ class DeviceCodeLogin:
         with self._lock:
             self._pending = {"device_code": body["device_code"], "expires_at": time.time() + int(body["expires_in"]),
                              "interval": int(body.get("interval", 5)), "next_poll": 0.0,
-                             "scopes": "full" if full else "read"}
+                             "scopes": level}
         return {"user_code": body["user_code"], "verification_uri": body["verification_uri"],
                 "expires_in": int(body["expires_in"]), "interval": int(body.get("interval", 5))}
 
@@ -238,13 +246,14 @@ class DelegatedTokenProvider:
             raise ConnectorError("No hay sesión de Microsoft iniciada para Intune. Conéctese desde Sincronización.",
                                  kind="config")
         tenant = saved.get("tenant_id") or "organizations"
-        read_only = saved.get("scopes") == "read"
-        resp = self._refresh(tenant, saved["refresh_token"], READ_SCOPE if read_only else SCOPE)
-        if resp.status_code != 200 and not read_only and _consent_missing(resp):
-            # Sesión anterior a la ampliación de permisos: sigue en solo lectura hasta que se reconecte.
-            resp = self._refresh(tenant, saved["refresh_token"], READ_SCOPE)
+        level = saved.get("scopes") if saved.get("scopes") in LEVELS else "full"
+        resp = self._refresh(tenant, saved["refresh_token"], LEVELS[level])
+        while resp.status_code != 200 and level in FALLBACK and _consent_missing(resp):
+            # Falta el consentimiento de algún permiso del nivel: se baja de nivel hasta que se reconecte.
+            level = FALLBACK[level]
+            resp = self._refresh(tenant, saved["refresh_token"], LEVELS[level])
             if resp.status_code == 200:
-                saved = {**saved, "scopes": "read"}
+                saved = {**saved, "scopes": level}
                 self.store.save(saved)
         if resp.status_code != 200:
             code = _error_code(resp)
