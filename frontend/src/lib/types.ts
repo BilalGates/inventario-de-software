@@ -47,6 +47,9 @@ export interface DeviceRow {
   source_last_sync_at: string | null;
   software_count?: number;
   sources?: string[];
+  type_code?: string | null;
+  unauthorized?: boolean;
+  state?: "ok" | "alert" | "nc" | "alertnc" | "infra";
 }
 
 export interface DeviceDetail extends DeviceRow {
