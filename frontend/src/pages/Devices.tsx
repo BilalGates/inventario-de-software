@@ -18,6 +18,7 @@ import { fmtBytes, fmtDate, fmtNumber, fmtRelative, isFailing, osFamily } from "
 import { useAction, useUrlState } from "@/lib/hooks";
 import { useDepartments, useDeviceTypes } from "@/lib/queries";
 import type { DeviceDetail, DeviceRow, Paged } from "@/lib/types";
+import { Avatar } from "@/components/Avatar";
 
 const INFRA = "Infraestructura";
 const NO_DEPT = "Sin departamento";
@@ -25,7 +26,6 @@ const NO_DEPT = "Sin departamento";
 const ALL = 1000;
 
 const state = (d: DeviceRow): DotKind => d.state ?? "ok";
-const initials = (name: string) => name.split(/[\s.@]+/).filter(Boolean).slice(0, 2).map((p) => p[0]!.toUpperCase()).join("");
 
 const columns = (grouped: boolean): Column<DeviceRow>[] => [
   { id: "name", header: "Equipo", sortKey: "name", cell: (d) => {
@@ -42,8 +42,7 @@ const columns = (grouped: boolean): Column<DeviceRow>[] => [
   } },
   { id: "user", header: "Usuario", cell: (d) => d.primary_user ? (
     <span className="flex max-w-52 items-center gap-2.5" title={d.primary_user_upn ?? ""}>
-      <span aria-hidden className="flex size-7 shrink-0 items-center justify-center rounded-full bg-subtle text-2xs font-semibold text-fg-2">
-        {initials(d.primary_user)}</span>
+      <Avatar upn={d.primary_user_upn} name={d.primary_user} />
       <span className="truncate">{d.primary_user}</span>
     </span>
   ) : <span className="text-muted">Sin usuario</span> },

@@ -26,7 +26,8 @@ from app.connectors.base import ConnectorError
 CLIENT_ID = "14d82eec-204b-4c2f-b7e8-296a70dab67e"  # Microsoft Graph Command Line Tools (app pública de Microsoft)
 # Niveles de permiso de la sesión (de menos a más). Cada nivel incluye el anterior:
 #   read: lectura del inventario de Intune (no suele requerir aprobación de un administrador).
-#   mail: además enviar correo desde un buzón compartido (Mail.Send.Shared, avisos al usuario).
+#   mail: además enviar correo desde un buzón compartido (Mail.Send.Shared, avisos al usuario) y leer
+#         las fotos de perfil (ProfilePhoto.Read.All). Ambos suelen poder aceptarlos el propio usuario.
 #   full: además conformidad (Configuration.Read/ReadWrite: leer motivos y crear scripts de
 #         desinstalación) y acciones remotas (PrivilegedOperations.All). Requiere un administrador global.
 # Nunca se usa .default: con este cliente compartido devolvería todos los permisos que alguien haya
@@ -34,8 +35,8 @@ CLIENT_ID = "14d82eec-204b-4c2f-b7e8-296a70dab67e"  # Microsoft Graph Command Li
 _G = "https://graph.microsoft.com/"
 _BASE = "offline_access openid profile"
 READ_SCOPE = f"{_G}DeviceManagementManagedDevices.Read.All {_BASE}"
-MAIL_SCOPE = f"{_G}DeviceManagementManagedDevices.Read.All {_G}Mail.Send.Shared {_BASE}"
-SCOPE = (f"{_G}DeviceManagementManagedDevices.Read.All {_G}Mail.Send.Shared "
+MAIL_SCOPE = f"{_G}DeviceManagementManagedDevices.Read.All {_G}Mail.Send.Shared {_G}ProfilePhoto.Read.All {_BASE}"
+SCOPE = (f"{_G}DeviceManagementManagedDevices.Read.All {_G}Mail.Send.Shared {_G}ProfilePhoto.Read.All "
          f"{_G}DeviceManagementConfiguration.Read.All {_G}DeviceManagementConfiguration.ReadWrite.All "
          f"{_G}DeviceManagementManagedDevices.PrivilegedOperations.All {_BASE}")
 LEVELS = {"read": READ_SCOPE, "mail": MAIL_SCOPE, "full": SCOPE}

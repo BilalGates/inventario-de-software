@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, LargeBinary, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import JSON, Base, utcnow
@@ -40,6 +40,10 @@ class User(Base):
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     source: Mapped[str] = mapped_column(String(30), default="manual")
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime)
+    # Foto de perfil de Microsoft 365 (96x96), en caché; photo_checked_at también se rellena si no tiene.
+    photo: Mapped[bytes | None] = mapped_column(LargeBinary, deferred=True)
+    photo_type: Mapped[str | None] = mapped_column(String(40))
+    photo_checked_at: Mapped[datetime | None] = mapped_column(DateTime)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 

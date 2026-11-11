@@ -243,10 +243,10 @@ function GraphConnection({ source }: { source: Source }) {
             {can.admin && <> · <button className="link" onClick={() => setConfirmOff(true)}>Desconectar</button></>}</p>
           {level !== "full" && (
             <p className="mt-1.5 text-xs text-muted">
-              Permisos: {level === "read" ? "solo inventario" : "inventario y avisos por correo"}. El motivo de la no conformidad, las
+              Permisos: {level === "read" ? "solo inventario" : "inventario, avisos por correo y fotos de perfil"}. El motivo de la no conformidad, las
               acciones remotas y la desinstalación requieren permisos aprobados por un administrador global del tenant
               {can.admin && <>
-                {level === "read" && <> · <button className="link" disabled={connect.isPending} onClick={() => connect.mutate("mail")}>Activar avisos por correo</button></>}
+                {level === "read" && <> · <button className="link" disabled={connect.isPending} onClick={() => connect.mutate("mail")}>Activar avisos por correo y fotos de perfil</button></>}
                 {" · "}<button className="link" disabled={connect.isPending} onClick={() => connect.mutate("full")}>Ampliar todos los permisos</button>
               </>}.</p>
           )}

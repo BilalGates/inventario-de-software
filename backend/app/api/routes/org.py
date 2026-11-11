@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import re
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -12,6 +12,7 @@ from app.api.common import export_response, not_found
 from app.core.security import CurrentUser, Reader, Technician
 from app.db import get_db, utcnow
 from app.models import (
+    AppSetting,
     AuditEvent,
     Department,
     Device,
@@ -20,7 +21,7 @@ from app.models import (
     SoftwareProduct,
     User,
 )
-from app.services import audit
+from app.services import audit, graph_session, photos
 
 router = APIRouter(prefix="/api", tags=["Organización"])
 
@@ -170,6 +171,29 @@ def department_detail(dept_id: int, db: Session = Depends(get_db), _: CurrentUse
 
 
 # ------------------------------------------------------------------------- usuarios
+@router.get("/users/photos")
+def user_photos(response: Response, db: Session = Depends(get_db), _: CurrentUser = Reader):
+    """Fotos de perfil en caché: {upn en minúsculas: data URI}. Quien no tiene foto no aparece."""
+    response.headers["Cache-Control"] = "private, max-age=3600"
+    return photos.all_photos(db)
+
+
+@router.post("/users/photos/refresh")
+def refresh_user_photos(db: Session = Depends(get_db), user: CurrentUser = Technician):
+    """Descarga ahora las fotos pendientes (p. ej. justo después de conceder el permiso)."""
+    if not graph_session.configured():
+        raise HTTPException(409, "No hay conexión con Microsoft. Conéctese desde Sincronización.")
+    row = db.get(AppSetting, photos.STATUS_KEY)
+    if row is not None:
+        db.delete(row)  # reintento explícito: se ignora el «sin permiso» anterior
+    result = photos.refresh(db, graph_session.make_client(), limit=200)
+    db.commit()
+    if result.get("skipped") == "permission":
+        raise HTTPException(403, "Microsoft Graph no concede el permiso ProfilePhoto.Read.All. Pulse «Activar avisos "
+                                 "por correo y fotos» en Sincronización (o pida a un administrador que lo apruebe).")
+    return result
+
+
 @router.get("/users")
 def list_users(q: str | None = None, app_only: bool = False, db: Session = Depends(get_db), _: CurrentUser = Reader):
     query = select(User).order_by(User.display_name, User.upn)

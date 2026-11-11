@@ -6,8 +6,8 @@ import { Link } from "react-router-dom";
 import { api } from "@/lib/api";
 import type { NotifyPreview, NotifyScope, UninstallPreview } from "@/lib/actions";
 import { useAction } from "@/lib/hooks";
-import { StatusDot } from "./kit";
 import { Button, ErrorState, Field, Modal, Notice, Spinner } from "./ui";
+import { Avatar } from "./Avatar";
 
 const INVALIDATE = [["alerts"], ["remote-actions"], ["dashboard"], ["alerts-count"]];
 
@@ -50,7 +50,7 @@ export function NotifyDialog({ scope, onClose }: { scope: NotifyScope; onClose: 
                   <li key={r.upn}>
                     <button type="button" onClick={() => setShown(i)}
                       className={`flex w-full items-start gap-3 px-3 py-2 text-left text-[13px] hover:bg-subtle ${i === shown ? "bg-subtle" : ""}`}>
-                      <StatusDot kind="alert" size="sm" className="mt-1" />
+                      <Avatar upn={r.upn} name={r.name} />
                       <span className="min-w-0 flex-1"><b>{r.name}</b> <span className="text-muted">· {r.upn}</span>
                         <span className="block truncate text-xs text-muted">{r.devices.join(", ")} · {r.programs.join(", ")}</span></span>
                     </button>

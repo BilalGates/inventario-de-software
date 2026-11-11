@@ -24,7 +24,7 @@ from app.core.config import get_settings
 from app.core.logging import setup_logging
 from app.db import session_scope, utcnow
 from app.models import AppSetting, InventoryRun, InventorySnapshot, InventorySource
-from app.services import graph_session
+from app.services import graph_session, photos
 from app.services import remote_actions
 from app.services import runs as run_service
 from app.services import snapshots
@@ -109,6 +109,13 @@ def tick(settings=None) -> dict:
                 summary["uninstalls"] = remote_actions.poll(db, graph_session.make_client())
     except Exception as exc:  # noqa: BLE001 — que un fallo de Graph no pare el worker
         log.warning("No se pudo consultar el estado de las desinstalaciones: %s", exc)
+    # Fotos de perfil (en caché; como mucho una revisión semanal por persona).
+    try:
+        with session_scope() as db:
+            if graph_session.configured() and photos.due(db, 1):
+                summary["photos"] = photos.refresh(db, graph_session.make_client())
+    except Exception as exc:  # noqa: BLE001
+        log.warning("No se pudieron actualizar las fotos de perfil: %s", exc)
     with session_scope() as db:
         hb = db.get(AppSetting, "worker.heartbeat") or AppSetting(key="worker.heartbeat")
         hb.value, hb.updated_by = {"at": utcnow().isoformat(timespec="seconds"), **summary}, "system:worker"
