@@ -6,6 +6,7 @@ import { useAuth, useCan } from "@/lib/auth";
 import { ROLE_LABEL, fmtRelative } from "@/lib/format";
 import { useAction } from "@/lib/hooks";
 import type { Source } from "@/lib/types";
+import { Avatar } from "@/components/Avatar";
 
 interface SettingsData {
   "schedule.monthly": { enabled: boolean; day: number; hour: number; sources: string[] };
@@ -44,7 +45,7 @@ export default function SettingsPage() {
         </Card>
         {(sources.data ?? []).filter((x) => x.code === "intune").map((src) => <IntuneConfig key={src.code} src={src} disabled={!can.admin} />)}
         <NotifySettings disabled={!can.admin} canTest={can.write} me={me.upn} />
-        <Card title="Usuarios y permisos">
+        <Card title="Usuarios y permisos" actions={can.write && <RefreshPhotos />}>
           <p className="mb-3 text-muted">
             Los roles se asignan en Microsoft Entra ID (roles de aplicación) a usuarios o grupos; la aplicación no gestiona contraseñas.
             Su sesión: <strong className="text-fg">{me.upn}</strong> · {ROLE_LABEL[me.role]}.
@@ -52,6 +53,7 @@ export default function SettingsPage() {
           <ul className="divide-y divide-border">
             {(users.data ?? []).map((u) => (
               <li key={u.id} className="flex items-center gap-2 py-2">
+                <Avatar upn={u.upn} name={u.display_name ?? u.upn} />
                 <span className="min-w-0 flex-1 truncate">{u.display_name ?? u.upn}<span className="block text-xs text-muted">{u.upn}</span></span>
                 <Badge tone={u.role === "admin" ? "accent" : "neutral"}>{ROLE_LABEL[u.role] ?? u.role}</Badge>
                 <span className="w-28 text-right text-xs text-muted">{fmtRelative(u.last_login_at)}</span>
@@ -87,6 +89,13 @@ function Schedule({ data, sources, disabled }: { data: SettingsData["schedule.mo
       </div>
     </Card>
   );
+}
+
+function RefreshPhotos() {
+  const run = useAction(() => api.send<{ updated: number; found: number }>("POST", "/users/photos/refresh"), {
+    success: (r) => `${r.found} fotos de perfil actualizadas`, invalidate: [["user-photos"]] });
+  return <Button size="sm" loading={run.isPending} onClick={() => run.mutate(undefined)}
+    title="Descarga las fotos de perfil de Microsoft 365 (requiere el permiso de fotos)">Actualizar fotos</Button>;
 }
 
 interface NotifyData { sender: string; cc: string; template: { subject: string; body: string } }

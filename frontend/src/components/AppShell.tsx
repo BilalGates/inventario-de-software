@@ -23,6 +23,7 @@ import { useAuth } from "@/lib/auth";
 import { ROLE_LABEL } from "@/lib/format";
 import { GlobalSearch } from "./GlobalSearch";
 import { cx } from "./ui";
+import { Avatar } from "./Avatar";
 
 interface NavItem { to: string; label: string; icon: LucideIcon; end?: boolean }
 
@@ -123,10 +124,6 @@ function Sidebar({ expanded, onToggle, alerts, mobile }: { expanded: boolean; on
   );
 }
 
-function initials(name: string) {
-  return name.split(/[\s.@]+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join("");
-}
-
 export function AppShell({ children }: { children: ReactNode }) {
   const { me, signOut, config } = useAuth();
   const [dark, toggleTheme] = useTheme();
@@ -181,8 +178,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               {!!alerts?.total && <span className="absolute right-2.5 top-2.5 size-1.5 rounded-full bg-signal-fill" aria-hidden />}
             </NavLink>
             <div className="ml-2 flex items-center gap-2.5 border-l border-border pl-4">
-              <span className="disp inline-flex size-8 items-center justify-center rounded-full bg-fg text-xs font-semibold tracking-normal text-bg"
-                aria-hidden>{initials(displayName)}</span>
+              <Avatar upn={me.upn} name={displayName} size="md" inverted className="disp" />
               <div className="hidden leading-tight sm:block">
                 <p className="max-w-40 truncate text-[13px] font-medium" title={me.upn}>{displayName}</p>
                 <p className="text-2xs text-muted">{ROLE_LABEL[me.role]}{config.auth_mode === "dev" && " · desarrollo"}</p>

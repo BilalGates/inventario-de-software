@@ -109,7 +109,7 @@ niveles. Si falta el consentimiento de un nivel, la sesión baja al anterior sin
 | Nivel | Añade | Consentimiento |
 |---|---|---|
 | `read` | `DeviceManagementManagedDevices.Read.All` (sincronizar el inventario) | Normalmente ya concedido |
-| `mail` («Activar avisos por correo») | `Mail.Send.Shared` | Suele bastar el del propio usuario, si el tenant lo permite |
+| `mail` («Activar avisos por correo y fotos de perfil») | `Mail.Send.Shared` y `ProfilePhoto.Read.All` (solo lee la foto de perfil, que se guarda en caché a 96×96 y se revisa como mucho una vez por semana) | Suele bastar el del propio usuario, si el tenant lo permite |
 | `full` («Ampliar todos los permisos») | `DeviceManagementConfiguration.Read.All` y `ReadWrite.All`, `DeviceManagementManagedDevices.PrivilegedOperations.All` | **Administrador global** (o administrador de roles con privilegios), para toda la organización |
 
 Con credenciales de aplicación (opción B) se usan los permisos de aplicación equivalentes:

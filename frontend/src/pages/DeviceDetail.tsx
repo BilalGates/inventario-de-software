@@ -14,6 +14,7 @@ import { useCan } from "@/lib/auth";
 import { CATEGORY_LABEL, CHANGE_LABEL, FIELD_LABEL, SOURCE_LABEL, fmtBytes, fmtDate, fmtDateTime, fmtRelative } from "@/lib/format";
 import { useAction } from "@/lib/hooks";
 import type { Change, DeviceDetail as Device, InstalledSoftware } from "@/lib/types";
+import { Avatar } from "@/components/Avatar";
 
 type Tab = "resumen" | "hardware" | "software" | "asignaciones" | "historial";
 
@@ -79,7 +80,8 @@ export default function DeviceDetail() {
           <Card title="Asignación" className="lg:col-span-2">
             <DefinitionList items={[
               ["Departamento", d.department ? <Link className="hover:underline" to={`/departamentos/${d.department_id}`}>{d.department}</Link> : "Sin asignar"],
-              ["Usuario principal", d.primary_user ? <span title={d.primary_user_upn ?? ""}>{d.primary_user}</span> : "—"],
+              ["Usuario principal", d.primary_user ? <span className="flex items-center gap-2.5" title={d.primary_user_upn ?? ""}>
+                <Avatar upn={d.primary_user_upn} name={d.primary_user} size="md" />{d.primary_user}</span> : "—"],
               ["Ubicación", d.location],
               ["Fecha de adquisición", fmtDate(d.purchase_date)],
               ["Coste", d.cost],

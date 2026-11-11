@@ -114,6 +114,29 @@ class GraphClient:
     def patch(self, path_or_url: str, json: dict[str, Any] | None = None) -> dict:
         return self._request("PATCH", path_or_url, json=json)
 
+    def get_bytes(self, path_or_url: str) -> tuple[bytes, str] | None:
+        """Contenido binario (p. ej. una foto de perfil). None si no existe (404)."""
+        url = path_or_url if path_or_url.startswith("http") else f"{self.base_url}{path_or_url}"
+        for attempt in range(2):
+            try:
+                self.request_count += 1
+                resp = self.http.get(url, headers={"Authorization": f"Bearer {self._get_token()}"})
+            except httpx.HTTPError as exc:
+                raise ConnectorError(f"Error de red con Graph: {type(exc).__name__}", kind="network") from exc
+            if resp.status_code == 401 and attempt == 0:
+                self._token = None
+                continue
+            if resp.status_code == 404:
+                return None
+            if resp.status_code == 403:
+                raise ConnectorError(f"Permisos insuficientes en Graph para {_path(url)} ({_safe_error_code(resp)}).",
+                                     kind="permission")
+            if resp.status_code == 200:
+                return resp.content, resp.headers.get("content-type", "image/jpeg").split(";")[0]
+            kind = "throttled" if resp.status_code == 429 else "error"
+            raise ConnectorError(f"Graph devolvió {resp.status_code} en {_path(url)}.", kind=kind)
+        raise ConnectorError("Graph rechazó la autenticación.", kind="auth")
+
     def _request(self, method: str, path_or_url: str, params: dict[str, Any] | None = None,
                  json: dict[str, Any] | None = None) -> dict:
         url = path_or_url if path_or_url.startswith("http") else f"{self.base_url}{path_or_url}"
