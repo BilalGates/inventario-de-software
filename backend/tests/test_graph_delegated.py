@@ -7,6 +7,7 @@ import pytest
 from app.connectors.base import ConnectorError
 from app.connectors.graph import GraphClient
 from app.connectors.graph_delegated import (
+    MAIL_SCOPE,
     READ_SCOPE,
     SCOPE,
     DelegatedTokenProvider,
@@ -108,21 +109,29 @@ def test_refresh_never_asks_for_default_scope(engine):
     assert asked == [SCOPE] and ".default" not in asked[0]
 
 
-def test_old_session_without_consent_falls_back_to_read_only(engine):
+def test_old_session_without_consent_falls_back_one_level_at_a_time(engine):
     store = _store()
     store.save({"refresh_token": "rt"})
     asked = []
+    refused = {SCOPE}
 
     def handler(req):
         asked.append(_scopes(req))
-        if _scopes(req) == SCOPE:
+        if _scopes(req) in refused:
             return httpx.Response(400, json={"error": "invalid_grant", "error_codes": [65001]})
-        return httpx.Response(200, json={"access_token": "at-read", "expires_in": 3600})
+        return httpx.Response(200, json={"access_token": "at", "expires_in": 3600})
 
-    assert DelegatedTokenProvider(store, _http(handler))(True) == "at-read"
-    assert asked == [SCOPE, READ_SCOPE]
-    assert store.load()["scopes"] == "read"
-    # Las siguientes renovaciones ya van directas a solo lectura.
+    # Sin consentimiento de administrador: baja a «mail» (avisos por correo) y se queda ahí.
+    assert DelegatedTokenProvider(store, _http(handler))(True) == "at"
+    assert asked == [SCOPE, MAIL_SCOPE] and store.load()["scopes"] == "mail"
+    asked.clear()
+    DelegatedTokenProvider(store, _http(handler))(True)
+    assert asked == [MAIL_SCOPE]
+    # Si tampoco hay consentimiento para el correo: solo lectura.
+    refused.add(MAIL_SCOPE)
+    asked.clear()
+    DelegatedTokenProvider(store, _http(handler))(True)
+    assert asked == [MAIL_SCOPE, READ_SCOPE] and store.load()["scopes"] == "read"
     asked.clear()
     DelegatedTokenProvider(store, _http(handler))(True)
     assert asked == [READ_SCOPE]

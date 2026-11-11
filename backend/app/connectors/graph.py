@@ -111,6 +111,9 @@ class GraphClient:
         """Acciones de Graph (p. ej. syncDevice). Suelen responder 204 sin cuerpo: devuelve {}."""
         return self._request("POST", path_or_url, json=json)
 
+    def patch(self, path_or_url: str, json: dict[str, Any] | None = None) -> dict:
+        return self._request("PATCH", path_or_url, json=json)
+
     def _request(self, method: str, path_or_url: str, params: dict[str, Any] | None = None,
                  json: dict[str, Any] | None = None) -> dict:
         url = path_or_url if path_or_url.startswith("http") else f"{self.base_url}{path_or_url}"

@@ -7,6 +7,7 @@ import { useCan } from "@/lib/auth";
 import { CATEGORY_LABEL } from "@/lib/format";
 import type { MenuEntry } from "./ContextMenu";
 import { StatusDot, authDot } from "./kit";
+import { NotifyDialog, UninstallDialog } from "./RemoteActionDialogs";
 import { Button, Field, Modal, useToast } from "./ui";
 
 export const POLICY_LABEL: Record<string, string> = {
@@ -67,6 +68,8 @@ export function useProductActions() {
   const { classify } = useClassify();
   const [merging, setMerging] = useState<{ product: ProductLike; target: string; reason: string } | null>(null);
   const [mergeBusy, setMergeBusy] = useState(false);
+  const [notifying, setNotifying] = useState<number | null>(null);
+  const [uninstalling, setUninstalling] = useState<number | null>(null);
 
   const patch = async (ids: number[], body: Record<string, unknown>, ok: string) => {
     try {
@@ -104,6 +107,12 @@ export function useProductActions() {
       ...(can.write ? [
         "separator" as const, ...policy,
         { label: "Excepción para departamento o equipo…", onSelect: () => nav(`/software/${p.id}?tab=politicas`) },
+        ...(p.status === "unauthorized" ? [
+          "separator" as const,
+          { label: "Avisar a quien la tiene instalada…", onSelect: () => setNotifying(p.id) },
+          { label: p.devices !== undefined ? `Desinstalar de los ${p.devices} equipos…` : "Desinstalar de los equipos…", danger: true,
+            onSelect: () => setUninstalling(p.id) },
+        ] : []),
         "separator" as const, category,
         { label: "Marcar como componente", onSelect: () => patch([p.id], { is_relevant: false, reason: "Marcado como componente" }, "Marcado como componente") },
         { label: "Fusionar con otro producto…", onSelect: () => setMerging({ product: p, target: "", reason: "" }) },
@@ -115,7 +124,12 @@ export function useProductActions() {
     ];
   };
 
-  const dialogs: ReactNode = merging && (
+  const remote: ReactNode = <>
+    {notifying !== null && <NotifyDialog scope={{ product_id: notifying }} onClose={() => setNotifying(null)} />}
+    {uninstalling !== null && <UninstallDialog productId={uninstalling} onClose={() => setUninstalling(null)} />}
+  </>;
+
+  const mergeDialog: ReactNode = merging && (
     <Modal open onClose={() => setMerging(null)} title={`Fusionar ${merging.product.name}`} footer={<>
       <Button onClick={() => setMerging(null)}>Cancelar</Button>
       <Button variant="primary" loading={mergeBusy} disabled={!Number(merging.target) || merging.reason.trim().length < 3}
@@ -146,5 +160,5 @@ export function useProductActions() {
     </Modal>
   );
 
-  return { entries, dialogs, classify };
+  return { entries, dialogs: <>{mergeDialog}{remote}</>, classify };
 }

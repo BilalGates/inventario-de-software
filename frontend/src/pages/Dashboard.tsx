@@ -142,7 +142,7 @@ function FleetMap({ fleet }: { fleet: FleetDevice[] }) {
                 <button key={d.id} type="button" title={d.name}
                   aria-label={`${d.name}: ${DOT_LABEL[d.state ?? "ok"] ?? ""}`} aria-pressed={sel?.id === d.id}
                   onClick={() => setSelectedId(d.id)}
-                  onContextMenu={(e) => ctx.openAt(e, actions.entries({ id: d.id, name: d.name, intune: d.type !== "server" && d.state !== "infra" }), d.name)}
+                  onContextMenu={(e) => ctx.openAt(e, actions.entries({ id: d.id, name: d.name, intune: d.type !== "server" && d.state !== "infra", unauthorized: d.unauthorized }), d.name)}
                   className={cx("flex size-11 items-center justify-center rounded-[10px] transition-colors hover:bg-subtle",
                     sel?.id === d.id && "bg-subtle ring-1 ring-border-strong")}>
                   <StatusDot kind={d.state ?? "ok"} size="lg" />

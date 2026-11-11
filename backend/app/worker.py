@@ -24,6 +24,8 @@ from app.core.config import get_settings
 from app.core.logging import setup_logging
 from app.db import session_scope, utcnow
 from app.models import AppSetting, InventoryRun, InventorySnapshot, InventorySource
+from app.services import graph_session
+from app.services import remote_actions
 from app.services import runs as run_service
 from app.services import snapshots
 from app.services.alerts import check_stale_sources
@@ -100,6 +102,14 @@ def tick(settings=None) -> dict:
         snap = maybe_generate_monthly_snapshot(db)
         summary["snapshot"] = snap.id if snap else None
         check_stale_sources(db, int(get_setting(db, "alerts.stale_source_days") or 3))
+    # Desinstalaciones lanzadas desde el inventario: se recoge el resultado que informa Intune.
+    try:
+        with session_scope() as db:
+            if remote_actions.has_pending(db) and graph_session.configured():
+                summary["uninstalls"] = remote_actions.poll(db, graph_session.make_client())
+    except Exception as exc:  # noqa: BLE001 — que un fallo de Graph no pare el worker
+        log.warning("No se pudo consultar el estado de las desinstalaciones: %s", exc)
+    with session_scope() as db:
         hb = db.get(AppSetting, "worker.heartbeat") or AppSetting(key="worker.heartbeat")
         hb.value, hb.updated_by = {"at": utcnow().isoformat(timespec="seconds"), **summary}, "system:worker"
         db.add(hb)

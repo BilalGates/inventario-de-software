@@ -5,6 +5,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { SnapshotBadge } from "@/components/badges";
 import { DataTable, type Column, type TableGroup } from "@/components/DataTable";
 import type { MenuEntry } from "@/components/ContextMenu";
+import { NotifyDialog, UninstallDialog } from "@/components/RemoteActionDialogs";
 import { BigNum, FilterChips, HATCH, Kpi, KpiStrip, ScreenHeader, StackBar, StatusDot, Stepper, Swatch, groupByDay, hhmm, type DotKind } from "@/components/kit";
 import { Badge, Button, Card, EmptyState, Field, Modal, Notice, Segmented, Spinner, Tabs } from "@/components/ui";
 import { useDashboard, type DashboardData } from "@/lib/dashboard";
@@ -13,8 +14,9 @@ import { useCan } from "@/lib/auth";
 import { CHANGE_LABEL, FIELD_LABEL, SOURCE_LABEL, currentPeriod, fmtDateTime, fmtPeriod, fmtRelative } from "@/lib/format";
 import { useAction, useUrlState } from "@/lib/hooks";
 import type { Alert, Change, Paged, Snapshot } from "@/lib/types";
+import { REMOTE_STATUS_LABEL, type NotifyScope, type RemoteAction } from "@/lib/actions";
 
-type Tab = "mensual" | "cambios" | "alertas" | "revision" | "registro";
+type Tab = "mensual" | "cambios" | "alertas" | "acciones" | "revision" | "registro";
 
 const weekFmt = new Intl.DateTimeFormat("es-ES", { day: "2-digit", month: "short" });
 const PHASES = ["Recogida", "Revisión", "Cierre", "Informe"];
@@ -92,12 +94,14 @@ export default function Audit() {
       <Tabs value={tab} onChange={(t) => setParams({ tab: t })} tabs={[
         { id: "mensual", label: "Inventarios mensuales" }, { id: "cambios", label: "Cambios" },
         { id: "alertas", label: "Alertas", count: dash?.alerts.open },
+        { id: "acciones", label: "Acciones remotas" },
         { id: "revision", label: "Casos de revisión", count: dash?.open_review_cases || undefined },
         { id: "registro", label: "Registro de auditoría" },
       ]} />
       {tab === "mensual" && <Monthly />}
       {tab === "cambios" && <Changes />}
       {tab === "alertas" && <Alerts />}
+      {tab === "acciones" && <RemoteActions />}
       {tab === "revision" && <ReviewCases />}
       {tab === "registro" && <AuditLog />}
     </>
@@ -314,6 +318,8 @@ function Alerts() {
   const q = useQuery({ queryKey: ["alerts", params], queryFn: () => api.get<Paged<Alert>>("/alerts", params), placeholderData: (p) => p });
   const [resolving, setResolving] = useState<Alert[] | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<number | string>>(new Set());
+  const [notifying, setNotifying] = useState<NotifyScope | null>(null);
+  const [uninstalling, setUninstalling] = useState<{ productId: number; deviceIds: number[] } | null>(null);
   const [note, setNote] = useState("");
   const act = useAction(async ({ ids, action, note }: { ids: number[]; action: string; note?: string }) => {
     for (const id of ids) await api.send("POST", `/alerts/${id}`, { action, note });
@@ -358,9 +364,21 @@ function Alerts() {
       );
     } },
     { id: "when", header: "Detectada", cell: (a) => <span className="whitespace-nowrap text-muted" title={`Vista por última vez ${fmtDateTime(a.last_seen_at)}`}>{fmtRelative(a.created_at)}</span> },
-    { id: "status", header: "Estado", cell: (a) => a.status === "resolved"
-      ? <span className="text-xs text-muted" title={a.resolution ?? ""}>Resuelta por {a.resolved_by}</span>
-      : a.status === "acknowledged" ? <span className="text-fg-2">En curso</span> : <span className="font-medium text-signal">Abierta</span> },
+    { id: "status", header: "Estado", cell: (a) => (
+      <div className="flex flex-col items-start gap-0.5">
+        {a.status === "resolved"
+          ? <span className="text-xs text-muted" title={a.resolution ?? ""}>Resuelta por {a.resolved_by}</span>
+          : a.status === "acknowledged" ? <span className="text-fg-2">En curso</span> : <span className="font-medium text-signal">Abierta</span>}
+        {a.last_action && a.status !== "resolved" && (
+          <span className={a.last_action.status === "failed" || a.last_action.status === "manual_required" ? "text-2xs text-signal" : "text-2xs text-muted"}
+            title={`${a.last_action.by} · ${fmtDateTime(a.last_action.at)}`}>
+            {a.last_action.kind === "notify"
+              ? (a.last_action.status === "failed" ? "Aviso fallido" : `Avisado ${fmtRelative(a.last_action.at)}`)
+              : `Desinstalación: ${REMOTE_STATUS_LABEL[a.last_action.status as keyof typeof REMOTE_STATUS_LABEL]?.toLowerCase() ?? a.last_action.status}`}
+          </span>
+        )}
+      </div>
+    ) },
   ];
   const pending = (list: Alert[]) => list.filter((x) => x.status !== "resolved");
   const menu = (a: Alert, sel: Alert[]): MenuEntry[] => {
@@ -370,6 +388,17 @@ function Alerts() {
       out.push({ label: sel.length > 1 ? `Resolver ${pending(sel).length} alertas…` : "Resolver…", hint: "R", onSelect: () => setResolving(pending(sel)) });
       if (sel.length === 1 && a.status === "open") out.push({ label: "Marcar en curso", onSelect: () => act.mutate({ ids: [a.id], action: "acknowledge" }) });
       if (a.product_id && a.device_id) out.push({ label: "Excepción para este equipo…", onSelect: () => nav(`/software/${a.product_id}?tab=politicas`) });
+      const soft = pending(sel).filter((x) => x.type === "unauthorized_software" && x.device_id && x.product_id);
+      if (soft.length) {
+        out.push("separator",
+          { label: soft.length > 1 ? `Avisar a los usuarios (${soft.length} alertas)…` : "Avisar al usuario…",
+            onSelect: () => setNotifying({ alert_ids: soft.map((x) => x.id) }) });
+        const products = new Set(soft.map((x) => x.product_id));
+        if (products.size === 1) {
+          out.push({ label: soft.length > 1 ? `Desinstalar de estos ${soft.length} equipos…` : "Desinstalar de este equipo…", danger: true,
+            onSelect: () => setUninstalling({ productId: soft[0].product_id!, deviceIds: soft.map((x) => x.device_id!) }) });
+        }
+      }
       out.push("separator");
     }
     out.push(
@@ -379,7 +408,14 @@ function Alerts() {
     );
     if (a.run_id) out.push({ label: `Ver ejecución #${a.run_id}`, onSelect: () => nav(`/sincronizacion?run=${a.run_id}`) });
     if (can.write && group && pending(group.rows).length > 1 && sel.length === 1) {
-      out.push("separator", { label: `Resolver las ${pending(group.rows).length} de este grupo…`, onSelect: () => setResolving(pending(group.rows)) });
+      const rows = pending(group.rows);
+      out.push("separator", { label: `Resolver las ${rows.length} de este grupo…`, onSelect: () => setResolving(rows) });
+      const soft = rows.filter((x) => x.type === "unauthorized_software" && x.device_id && x.product_id);
+      if (!byDevice && soft.length > 1) {
+        out.push({ label: `Avisar a los usuarios de los ${soft.length} equipos…`, onSelect: () => setNotifying({ alert_ids: soft.map((x) => x.id) }) },
+          { label: `Desinstalar de los ${soft.length} equipos…`, danger: true,
+            onSelect: () => setUninstalling({ productId: soft[0].product_id!, deviceIds: soft.map((x) => x.device_id!) }) });
+      }
     }
     return out;
   };
@@ -401,6 +437,8 @@ function Alerts() {
         ]} /></div>}
         toolbar={<Segmented label="Agrupar" value={byDevice ? "device" : "cause"} onChange={(v) => set({ by: v === "cause" ? null : "device" })}
           options={[{ id: "cause", label: "Por causa" }, { id: "device", label: "Por equipo" }]} />} />
+      {notifying && <NotifyDialog scope={notifying} onClose={() => setNotifying(null)} />}
+      {uninstalling && <UninstallDialog productId={uninstalling.productId} deviceIds={uninstalling.deviceIds} onClose={() => setUninstalling(null)} />}
       {resolving && (
         <Modal open onClose={() => setResolving(null)} title={resolving.length === 1 ? "Resolver alerta" : `Resolver ${resolving.length} alertas`} footer={<>
           <Button onClick={() => setResolving(null)}>Cancelar</Button>
@@ -414,6 +452,71 @@ function Alerts() {
         </Modal>
       )}
     </>
+  );
+}
+
+// ------------------------------------------------------------------ acciones remotas
+const ACTION_DOT: Record<string, DotKind> = {
+  sent: "running", running: "running", succeeded: "success", failed: "failed", manual_required: "warning", expired: "warning",
+};
+
+function RemoteActions() {
+  const can = useCan();
+  const nav = useNavigate();
+  const { values, set, page } = useUrlState(["kind", "rstatus"] as const);
+  const params = { kind: values.kind ?? undefined, status: values.rstatus ?? undefined, page, page_size: 50 };
+  const q = useQuery({ queryKey: ["remote-actions", params], queryFn: () => api.get<Paged<RemoteAction>>("/remote-actions", params),
+    placeholderData: (p) => p,
+    refetchInterval: (s) => (s.state.data?.items.some((a) => a.kind === "uninstall" && ["sent", "running"].includes(a.status)) ? 30_000 : false) });
+  const retry = useAction((id: number) => api.send("POST", `/remote-actions/${id}/retry`), {
+    success: "Desinstalación relanzada", invalidate: [["remote-actions"], ["alerts"]] });
+  const cols: Column<RemoteAction>[] = [
+    { id: "at", header: "Hora", cell: (a) => <span className="code whitespace-nowrap text-muted" title={fmtDateTime(a.requested_at)}>{hhmm(a.requested_at)}</span> },
+    { id: "what", header: "Acción", cell: (a) => (
+      <span className="flex items-center gap-2.5">
+        <StatusDot kind={ACTION_DOT[a.status] ?? "muted"} />
+        <span className="font-semibold">{a.kind === "notify" ? "Aviso por correo" : "Desinstalación"}</span>
+      </span>
+    ) },
+    { id: "target", header: "Equipo · aplicación", cell: (a) => (
+      <div className="min-w-0">
+        {a.device_id ? <Link to={`/dispositivos/${a.device_id}`} className="font-medium hover:underline">{a.device}</Link> : "—"}
+        <p className="text-xs text-muted">{a.product ?? ""}{a.recipient ? ` · ${a.recipient}` : ""}</p>
+      </div>
+    ) },
+    { id: "status", header: "Resultado", cell: (a) => (
+      <div className="max-w-[28rem] whitespace-normal">
+        <span className={["failed", "manual_required", "expired"].includes(a.status) ? "font-medium text-signal" : "text-fg-2"}>
+          {a.kind === "notify" && a.status === "sent" ? "Enviado" : REMOTE_STATUS_LABEL[a.status]}</span>
+        {(a.detail.output || a.detail.error) && <p className="line-clamp-2 font-mono text-2xs text-muted" title={a.detail.output ?? a.detail.error}>{a.detail.output ?? a.detail.error}</p>}
+      </div>
+    ) },
+    { id: "by", header: "Pedida por", cell: (a) => <span className="text-muted">{a.requested_by}</span> },
+  ];
+  return (
+    <DataTable columns={cols} rows={q.data?.items} total={q.data?.total} rowKey={(a) => a.id} loading={q.isLoading} error={q.error}
+      groups={groupByDay(q.data?.items ?? [], (a) => a.requested_at)}
+      page={page} pageSize={50} onPage={(p) => set({ page: p }, false)} storageKey="remote-actions"
+      rowMenu={(a) => ({ title: a.kind === "notify" ? "Aviso por correo" : "Desinstalación", entries: [
+        ...(can.write && a.kind === "uninstall" && ["failed", "expired", "manual_required"].includes(a.status)
+          ? [{ label: "Reintentar", onSelect: () => retry.mutate(a.id) }, "separator" as const] : []),
+        { label: "Abrir equipo", disabled: !a.device_id, onSelect: () => nav(`/dispositivos/${a.device_id}`) },
+        { label: "Abrir aplicación", disabled: !a.product_id, onSelect: () => nav(`/software/${a.product_id}`) },
+        { label: "Copiar el resultado", disabled: !(a.detail.output || a.detail.error),
+          onSelect: () => navigator.clipboard?.writeText(a.detail.output ?? a.detail.error ?? "") },
+      ] })}
+      empty={<EmptyState title="Aún no se ha avisado ni desinstalado nada desde el inventario">
+        Se lanzan con el clic derecho sobre una alerta, una aplicación no autorizada o un equipo.</EmptyState>}
+      footer="Las desinstalaciones las ejecuta Intune cuando el equipo está conectado; el resultado se actualiza solo. Si sale bien, la alerta se cierra en la próxima sincronización."
+      header={<div className="flex flex-wrap items-center gap-3 py-3">
+        <FilterChips label="Tipo" value={values.kind ?? "all"} onChange={(v) => set({ kind: v === "all" ? null : v })} options={[
+          { id: "all", label: "Todas" }, { id: "notify", label: "Avisos" }, { id: "uninstall", label: "Desinstalaciones" },
+        ]} />
+        <FilterChips label="Resultado" value={values.rstatus ?? "all"} onChange={(v) => set({ rstatus: v === "all" ? null : v })} options={[
+          { id: "all", label: "Cualquier resultado" }, { id: "sent,running", label: "En curso", dot: "running" },
+          { id: "succeeded", label: "Hechas", dot: "success" }, { id: "failed,manual_required,expired", label: "Requieren atención", dot: "failed" },
+        ]} />
+      </div>} />
   );
 }
 

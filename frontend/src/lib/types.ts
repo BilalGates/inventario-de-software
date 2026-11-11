@@ -200,6 +200,8 @@ export interface Source {
   graph_auth?: "app" | "delegated" | null;
   graph_account?: string | null;
   graph_read_only?: boolean;
+  /** Nivel de permisos de la sesión: read · mail (avisos por correo) · full (además conformidad y desinstalación). */
+  graph_scopes?: "read" | "mail" | "full";
 }
 
 export interface DeviceCodeStart {
@@ -245,6 +247,8 @@ export interface Alert {
   resolved_at: string | null;
   resolved_by: string | null;
   resolution: string | null;
+  /** Último aviso o desinstalación lanzados desde el inventario para ese equipo y aplicación. */
+  last_action?: { kind: "notify" | "uninstall"; status: string; at: string; by: string } | null;
 }
 
 export interface Coverage {

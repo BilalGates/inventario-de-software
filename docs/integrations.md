@@ -98,6 +98,58 @@ Por qué es preferible a la opción A:
 - **Pendiente de verificar en el tenant**: que v1.0 devuelve `settingStates` rellenos y los
   nombres exactos de los ajustes (`setting`) de las directivas de Asserta.
 
+### Software no autorizado: aviso por correo y desinstalación remota
+
+Las dos acciones son **siempre manuales**: las lanza un técnico desde el menú de una alerta, de una
+aplicación «No autorizado» o de un equipo. Quedan en auditoría y en *Auditoría › Acciones remotas*.
+
+**Permisos (sesión de usuario, por niveles).** En *Sincronización*, la conexión con Microsoft tiene tres
+niveles. Si falta el consentimiento de un nivel, la sesión baja al anterior sin desconectarse:
+
+| Nivel | Añade | Consentimiento |
+|---|---|---|
+| `read` | `DeviceManagementManagedDevices.Read.All` (sincronizar el inventario) | Normalmente ya concedido |
+| `mail` («Activar avisos por correo») | `Mail.Send.Shared` | Suele bastar el del propio usuario, si el tenant lo permite |
+| `full` («Ampliar todos los permisos») | `DeviceManagementConfiguration.Read.All` y `ReadWrite.All`, `DeviceManagementManagedDevices.PrivilegedOperations.All` | **Administrador global** (o administrador de roles con privilegios), para toda la organización |
+
+Con credenciales de aplicación (opción B) se usan los permisos de aplicación equivalentes:
+`Mail.Send` (conviene limitarlo al buzón remitente con una *Application Access Policy* de Exchange),
+`DeviceManagementConfiguration.ReadWrite.All` y `DeviceManagementManagedDevices.PrivilegedOperations.All`.
+
+**Aviso por correo.**
+- **Configuración:** en *Configuración › Avisos por correo* se configuran el buzón compartido remitente, la copia
+  opcional y la plantilla (campos `{nombre}`, `{equipo}`, `{programas}` y `{fecha}`).
+- **Permiso en Exchange:** la cuenta conectada necesita **«Enviar como»** sobre ese buzón (Centro de administración
+  de Exchange › Buzón › Delegación).
+- **Contenido:** se envía un correo por persona (el usuario principal del equipo según Intune) con todos sus programas
+  no autorizados. De cada programa incluye el motivo y la alternativa que dejó la política en las notas del producto.
+- **Equipos sin usuario:** se listan y no se avisa a nadie.
+- **Petición:** `POST /v1.0/users/{remitente}/sendMail`.
+
+**Desinstalación (Intune Remediations; requiere licencia Windows Enterprise E3/E5 o Microsoft 365 E3/E5).**
+- **Script:** se crea un *deviceHealthScript* por producto (`POST /beta/deviceManagement/deviceHealthScripts`), que se
+  reutiliza y se actualiza si cambia. Se ejecuta como SYSTEM en 64 bits.
+  - **Detección:** busca los nombres con los que se detectó el programa en las claves `Uninstall` de HKLM (64/32 bits)
+    y de cada perfil (HKU), y como paquete AppX/MSIX.
+  - **Corrección:** según lo que encuentra, usa `msiexec /x {GUID} /qn`, `QuietUninstallString` o
+    `Remove-AppxPackage -AllUsers`. Si el programa no tiene modo silencioso, no se toca y se informa «MANUAL».
+  - Generador: `app/services/uninstall_script.py`.
+- **Ejecución:** se lanza bajo demanda en cada equipo con
+  `POST /beta/deviceManagement/managedDevices/{id}/initiateOnDemandProactiveRemediation`.
+- **Seguimiento:** el worker lee `GET …/deviceHealthScripts/{id}/deviceRunStates` y deja cada acción en hecha,
+  fallida, manual o sin respuesta (a las 24 h). Si sale bien, pide `syncDevice`; la siguiente sincronización
+  marca la instalación como retirada y cierra la alerta.
+- **Salvaguardas:**
+  - solo productos «No autorizado»;
+  - nunca componentes, drivers ni runtimes;
+  - lista protegida de software base y de seguridad: Intune, Panda, FortiClient, Microsoft 365/Edge/OneDrive/Teams,
+    Windows, Defender, KeePass, Wazuh…;
+  - simulación previa y confirmación con motivo obligatorio.
+- **Pendiente de verificar en el tenant:**
+  - los nombres exactos de los campos de salida de `deviceRunStates` en beta;
+  - que *Remediations* está habilitado: requisito de licencia y aceptación de los términos en Intune ›
+    Dispositivos › Scripts y correcciones.
+
 ### Discovered Apps vs. App Inventory
 
 *Discovered apps* (detectedApps) lo recoge la Intune Management Extension y está en Graph v1.0;

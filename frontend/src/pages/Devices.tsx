@@ -226,7 +226,7 @@ export default function Devices() {
 
   const count = (f: StateFilter) => all.filter(MATCH[f]).length;
   const like = (d: DeviceRow): DeviceLike => ({ id: d.id, name: d.name, serial_number: d.serial_number, status: d.status,
-    intune: d.sources?.includes("intune") });
+    intune: d.sources?.includes("intune"), unauthorized: d.unauthorized });
   const total = dash?.devices.total ?? all.length;
   const deptCount = dash?.departments.length;
 

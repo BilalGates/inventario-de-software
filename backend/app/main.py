@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api.routes import devices, inventory, org, software
+from app.api.routes import actions, devices, inventory, org, software
 from app.core.config import get_settings
 from app.core.logging import setup_logging
 
@@ -57,7 +57,7 @@ def create_app() -> FastAPI:
         return JSONResponse(status_code=500, content={"detail": "Error interno. Consulte los registros del servidor."})
 
     for router in (devices.router, org.router, software.router, software.policies, inventory.router,
-                   inventory.health):
+                   inventory.health, actions.router):
         app.include_router(router)
 
     @app.get("/api/config/public", tags=["Sistema"])
