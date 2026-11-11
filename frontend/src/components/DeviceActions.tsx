@@ -7,6 +7,7 @@ import { useAction } from "@/lib/hooks";
 import { useDepartments } from "@/lib/queries";
 import type { DeviceDetail as Device } from "@/lib/types";
 import type { MenuEntry } from "./ContextMenu";
+import { NotifyDialog } from "./RemoteActionDialogs";
 import { DeviceForm, type DeviceFormValues } from "./DeviceForm";
 import { Button, Field, Modal, useToast } from "./ui";
 
@@ -17,6 +18,8 @@ export interface DeviceLike {
   status?: string;
   /** El equipo está en Intune (se ofrecen sus acciones remotas). */
   intune?: boolean;
+  /** Tiene software no autorizado (se ofrece avisar al usuario). */
+  unauthorized?: boolean;
 }
 
 const INVALIDATE = [["devices"], ["dashboard"], ["departments"]];
@@ -29,6 +32,7 @@ export function useDeviceActions() {
   const [editing, setEditing] = useState<Device | null>(null);
   const [owner, setOwner] = useState<{ device: DeviceLike; upn: string } | null>(null);
   const [retiring, setRetiring] = useState<{ devices: DeviceLike[]; reactivate: boolean; reason: string } | null>(null);
+  const [notifying, setNotifying] = useState<number[] | null>(null);
 
   const move = useAction(({ ids, department_id }: { ids: number[]; department_id: number | null }) =>
     api.send<{ moved: number }>("POST", "/devices/bulk-assign", { device_ids: ids, department_id, reason: "Movido desde el menú de acciones" }),
@@ -66,6 +70,8 @@ export function useDeviceActions() {
       return [
         ...(can.write ? [{ label: `Mover ${selection.length} equipos`, submenu: moveTo } as MenuEntry] : []),
         { label: "Copiar nombres", onSelect: () => copy(selection.map((d) => d.name).join("\n"), "Nombres") },
+        ...(can.write && selection.some((d) => d.unauthorized) ? [{ label: "Avisar a sus usuarios del software no autorizado…",
+          onSelect: () => setNotifying(selection.filter((d) => d.unauthorized).map((d) => d.id)) } as MenuEntry] : []),
         ...(can.write ? ["separator" as const, { label: `Dar de baja ${selection.length} equipos…`, danger: true,
           onSelect: () => setRetiring({ devices: selection.filter((d) => d.status !== "retired"), reactivate: false, reason: "" }) }] : []),
       ];
@@ -80,6 +86,9 @@ export function useDeviceActions() {
         { label: "Editar…", onSelect: () => openEdit(device.id) },
         { label: "Mover a departamento", submenu: moveTo },
         { label: "Asignar usuario…", onSelect: () => setOwner({ device, upn: "" }) });
+      if (device.unauthorized) {
+        out.push({ label: "Avisar al usuario de su software no autorizado…", onSelect: () => setNotifying([device.id]) });
+      }
       if (device.intune) {
         out.push({ label: "Intune", submenu: [
           { label: "Sincronizar equipo", onSelect: () => intune.mutate({ id: device.id, action: "sync" }) },
@@ -105,6 +114,7 @@ export function useDeviceActions() {
 
   const dialogs: ReactNode = (
     <>
+      {notifying && <NotifyDialog scope={{ device_ids: notifying }} onClose={() => setNotifying(null)} />}
       {editing && (
         <DeviceForm open onClose={() => setEditing(null)} initial={editing} title={`Editar ${editing.name}`} busy={save.isPending}
           onSubmit={(v) => save.mutate({ id: editing.id, v })} />

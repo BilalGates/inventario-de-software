@@ -1,11 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Archive, Pencil, RotateCcw, Upload } from "lucide-react";
 import { useState } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { AuthBadge, ComplianceBadge, DeviceStatusBadge, FreshnessBadge, SourceBadge } from "@/components/badges";
 import { CompliancePanel } from "@/components/CompliancePanel";
 import { DataTable, type Column } from "@/components/DataTable";
 import { DeviceForm, type DeviceFormValues } from "@/components/DeviceForm";
+import { NotifyDialog, UninstallDialog } from "@/components/RemoteActionDialogs";
 import { UploadDialog } from "@/components/UploadDialog";
 import { Badge, Button, Card, ConfirmDialog, DefinitionList, EmptyState, ErrorState, Field, PageHeader, Spinner, Tabs } from "@/components/ui";
 import { api } from "@/lib/api";
@@ -159,7 +160,11 @@ export default function DeviceDetail() {
 }
 
 function DeviceSoftware({ id }: { id: number }) {
+  const can = useCan();
+  const nav = useNavigate();
   const [removed, setRemoved] = useState(false);
+  const [notifying, setNotifying] = useState(false);
+  const [uninstalling, setUninstalling] = useState<number | null>(null);
   const [onlyRelevant, setOnlyRelevant] = useState(true);
   const [search, setSearch] = useState("");
   const q = useQuery({ queryKey: ["device-software", id, removed],
@@ -176,9 +181,17 @@ function DeviceSoftware({ id }: { id: number }) {
     { id: "first", header: "Detectado", cell: (s) => fmtDate(s.first_seen_at) },
     { id: "state", header: "Presente", cell: (s) => s.present ? "Sí" : <span className="text-muted">Retirado {fmtDate(s.removed_at)}</span> },
   ];
+  const bad = (s: InstalledSoftware) => s.present && s.authorization_status === "unauthorized";
   return (
+    <>
     <DataTable columns={cols} rows={rows} rowKey={(s) => s.installation_id} loading={q.isLoading} error={q.error}
       storageKey="device-software" onSearch={setSearch} search={search} searchPlaceholder="Filtrar aplicaciones…"
+      rowMenu={(s) => ({ title: s.name, entries: [
+        { label: "Abrir aplicación", onSelect: () => nav(`/software/${s.product_id}`) },
+        ...(can.write && bad(s) ? ["separator" as const,
+          { label: "Avisar al usuario…", onSelect: () => setNotifying(true) },
+          { label: "Desinstalar de este equipo…", danger: true, onSelect: () => setUninstalling(s.product_id) }] : []),
+      ] })}
       rowClassName={(s) => (s.present ? undefined : "opacity-60")}
       toolbar={<>
         <label className="flex items-center gap-1.5 text-sm text-muted">
@@ -191,6 +204,9 @@ function DeviceSoftware({ id }: { id: number }) {
         </label>
       </>}
       empty={<EmptyState title="Sin software registrado">Sincronice Intune o importe una exportación de Panda.</EmptyState>} />
+    {notifying && <NotifyDialog scope={{ device_ids: [id] }} onClose={() => setNotifying(false)} />}
+    {uninstalling !== null && <UninstallDialog productId={uninstalling} deviceIds={[id]} onClose={() => setUninstalling(null)} />}
+    </>
   );
 }
 

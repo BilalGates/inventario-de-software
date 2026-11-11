@@ -43,6 +43,7 @@ export default function SettingsPage() {
           <p className="mt-4 text-xs text-muted">Las credenciales y secretos se configuran en variables de entorno del servidor, nunca desde la aplicación (Vercel y GitHub; ver docs/despliegue-nube.md).</p>
         </Card>
         {(sources.data ?? []).filter((x) => x.code === "intune").map((src) => <IntuneConfig key={src.code} src={src} disabled={!can.admin} />)}
+        <NotifySettings disabled={!can.admin} canTest={can.write} me={me.upn} />
         <Card title="Usuarios y permisos">
           <p className="mb-3 text-muted">
             Los roles se asignan en Microsoft Entra ID (roles de aplicación) a usuarios o grupos; la aplicación no gestiona contraseñas.
@@ -83,6 +84,45 @@ function Schedule({ data, sources, disabled }: { data: SettingsData["schedule.mo
         </fieldset>
         <p className="text-xs text-muted">Tras las sincronizaciones se genera el borrador del inventario del mes, que IT revisa y aprueba en Auditoría.</p>
         {!disabled && <Button variant="primary" loading={save.isPending} disabled={v.day < 1 || v.day > 28 || v.hour < 0 || v.hour > 23} onClick={() => save.mutate(undefined)}>Guardar</Button>}
+      </div>
+    </Card>
+  );
+}
+
+interface NotifyData { sender: string; cc: string; template: { subject: string; body: string } }
+
+function NotifySettings({ disabled, canTest, me }: { disabled: boolean; canTest: boolean; me: string }) {
+  const q = useQuery({ queryKey: ["settings", "notify"], queryFn: () => api.get<NotifyData>("/settings/notify") });
+  const [v, setV] = useState<{ sender: string; cc: string; subject: string; body: string } | null>(null);
+  useEffect(() => { if (q.data) setV({ sender: q.data.sender, cc: q.data.cc, ...q.data.template }); }, [q.data]);
+  const save = useAction(() => api.send("PUT", "/settings/notify", v), { success: "Avisos guardados", invalidate: [["settings"]] });
+  const test = useAction(() => api.send<{ sent_to: string }>("POST", "/notifications/test"), { success: (r) => `Correo de prueba enviado a ${r.sent_to}` });
+  if (!v) return <Card title="Avisos por correo"><Spinner /></Card>;
+  const validSender = !v.sender || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.sender);
+  return (
+    <Card title="Avisos por correo">
+      <div className="space-y-4">
+        <p className="text-muted">Correo al usuario de un equipo con software no autorizado. Se envía solo cuando un técnico lo pide, desde una alerta, una aplicación o un equipo.</p>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Buzón remitente" hint="Buzón compartido; la cuenta conectada necesita «Enviar como» en Exchange." error={validSender ? null : "Formato usuario@dominio"}>
+            {(id) => <input id={id} type="email" className="field" disabled={disabled} placeholder="it@asserta.es" value={v.sender} onChange={(e) => setV({ ...v, sender: e.target.value })} />}
+          </Field>
+          <Field label="Copia a (opcional)" hint="Varias direcciones separadas por comas">
+            {(id) => <input id={id} className="field" disabled={disabled} value={v.cc} onChange={(e) => setV({ ...v, cc: e.target.value })} />}
+          </Field>
+        </div>
+        <Field label="Asunto" hint="Campos: {nombre}, {equipo}, {programas}, {fecha}">
+          {(id) => <input id={id} className="field" disabled={disabled} value={v.subject} onChange={(e) => setV({ ...v, subject: e.target.value })} />}
+        </Field>
+        <Field label="Texto">
+          {(id) => <textarea id={id} rows={9} className="field font-mono text-xs" disabled={disabled} value={v.body} onChange={(e) => setV({ ...v, body: e.target.value })} />}
+        </Field>
+        <div className="flex flex-wrap gap-2">
+          {!disabled && <Button variant="primary" loading={save.isPending} disabled={!validSender || v.subject.trim().length < 3 || v.body.trim().length < 10}
+            onClick={() => save.mutate(undefined)}>Guardar</Button>}
+          {canTest && <Button loading={test.isPending} disabled={!q.data?.sender} onClick={() => test.mutate(undefined)}
+            title={q.data?.sender ? undefined : "Guarde primero el buzón remitente"}>Enviar prueba a {me}</Button>}
+        </div>
       </div>
     </Card>
   );
