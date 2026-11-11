@@ -1,20 +1,23 @@
 import { useQuery } from "@tanstack/react-query";
-import { Download, Tags } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, Tags } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
-import { AuthBadge } from "@/components/badges";
-import { DataTable, type Column } from "@/components/DataTable";
-import { Badge, Button, ConfirmDialog, Field, Modal, PageHeader, Stat, StatStrip, Tabs } from "@/components/ui";
-import { Meter, Panel, RankedList, fmtPct, pct } from "@/components/viz";
-import { useDashboard, type DashboardData, type RankedProduct } from "@/lib/dashboard";
+import { Link, useNavigate } from "react-router-dom";
+import { DataTable, type Column, type TableGroup } from "@/components/DataTable";
+import {
+  Bar, BigNum, Donut, FilterChips, HATCH, Kpi, KpiStrip, Legend, ScreenHeader, Spark, StackBar, StatusDot, authDot,
+} from "@/components/kit";
+import { POLICY_LABEL, useClassify, useProductActions, type ProductLike } from "@/components/SoftwareActions";
+import { Badge, Button, Field, Modal, Segmented } from "@/components/ui";
+import { useDashboard, type DashboardData, type QueueProduct } from "@/lib/dashboard";
 import { api } from "@/lib/api";
 import { useCan } from "@/lib/auth";
-import { AUTH_LABEL, CATEGORY_LABEL, fmtDate, fmtNumber } from "@/lib/format";
+import { AUTH_LABEL, CATEGORY_LABEL, fmtDate, fmtNumber, parseUtc } from "@/lib/format";
 import { useAction, useUrlState } from "@/lib/hooks";
 import { useDepartments } from "@/lib/queries";
 import type { Paged, Product } from "@/lib/types";
 
-const PAGE_SIZE = 50;
+/** El catálogo relevante son cientos de productos: se carga entero para agruparlo por política. */
+const ALL = 1000;
 
 function monthStart(offset = 0) {
   const d = new Date();
@@ -28,166 +31,230 @@ const VIEWS = {
   unused: { label: "Sin instalaciones vigentes", params: { installed: false } },
 } as const;
 
+type Policy = "unauthorized" | "pending" | "conditional" | "authorized";
+const ORDER: Policy[] = ["unauthorized", "pending", "conditional", "authorized"];
+const policyOf = (s: string): Policy =>
+  s === "unauthorized" ? "unauthorized" : s === "conditional" ? "conditional" : s === "authorized" || s === "exception" ? "authorized" : "pending";
+const GROUP_LABEL: Record<Policy, string> = {
+  unauthorized: "No autorizado", pending: "Por decidir", conditional: "Con condiciones", authorized: "Autorizado",
+};
+
 function columns(fleet: number): Column<Product>[] {
   return [
     { id: "name", header: "Producto", sortKey: "name", cell: (p) => (
-      <Link to={`/software/${p.id}`} title={p.name}
-        className="block max-w-[22rem] truncate font-medium hover:underline hover:underline-offset-4 2xl:max-w-xl">{p.name}</Link>
-    ) },
-    { id: "publisher", header: "Editor", sortKey: "publisher", cell: (p) => <span className="block max-w-48 truncate text-muted" title={p.publisher ?? ""}>{p.publisher ?? "—"}</span> },
-    { id: "category", header: "Categoría", cell: (p) => <span className="text-muted">{CATEGORY_LABEL[p.category] ?? p.category}</span> },
-    { id: "versions", header: "Versiones", align: "right", cell: (p) => <span className="code">{p.versions}</span> },
-    { id: "devices", header: "Equipos", sortKey: "devices", cell: (p) => (
-      <div className="flex items-center gap-2.5">
-        <span className="disp w-7 text-right text-sm font-semibold">{p.devices}</span>
-        <span className="w-20"><Meter value={p.devices} max={fleet} /></span>
+      <div className="flex min-w-0 items-center gap-3">
+        <StatusDot kind={authDot(p.authorization_status)} />
+        <div className="min-w-0">
+          <Link to={`/software/${p.id}`} title={p.name}
+            className="block max-w-[22rem] truncate text-[13px] font-semibold hover:underline hover:underline-offset-4 2xl:max-w-xl">{p.name}</Link>
+          <p className="max-w-[22rem] truncate text-xs text-muted" title={p.publisher ?? ""}>{p.publisher ?? "Editor desconocido"}</p>
+        </div>
       </div>
     ) },
-    { id: "status", header: "Autorización", sortKey: "status", cell: (p) => <AuthBadge status={p.authorization_status} /> },
+    { id: "publisher", header: "Editor", sortKey: "publisher", hidden: true,
+      cell: (p) => <span className="block max-w-48 truncate text-muted" title={p.publisher ?? ""}>{p.publisher ?? "—"}</span> },
+    { id: "category", header: "Categoría", cell: (p) => <span className="text-fg-2">{CATEGORY_LABEL[p.category] ?? p.category}</span> },
+    { id: "versions", header: "Versiones", align: "right", cell: (p) => <span className="code">{p.versions}</span> },
+    { id: "devices", header: "Equipos", sortKey: "devices", cell: (p) => (
+      <div className="flex items-center gap-3">
+        <span className="disp w-7 text-right text-sm font-semibold">{p.devices}</span>
+        <span className="w-28"><Bar value={p.devices} max={fleet} className={p.authorization_status === "unauthorized" ? "bg-signal-fill" : "bg-chart-2"} /></span>
+      </div>
+    ) },
+    { id: "status", header: "Política", sortKey: "status", cell: (p) => (
+      <span className={p.authorization_status === "unauthorized" ? "font-medium text-signal" : "text-fg-2"}>{POLICY_LABEL[p.authorization_status] ?? p.authorization_status}</span>
+    ) },
     { id: "ens", header: "Clasificación ENS", hidden: true, cell: (p) => p.ens_classification ?? "—" },
     { id: "first", header: "Primera detección", sortKey: "first_seen_at", hidden: true, cell: (p) => <span className="text-muted">{fmtDate(p.first_seen_at)}</span> },
   ];
 }
 
-const STATUS_TABS = [
-  { id: "all", label: "Todo", status: null },
-  { id: "authorized", label: "Autorizado", status: "authorized" },
-  { id: "conditional", label: "Condicionado", status: "conditional" },
-  { id: "pending", label: "Por clasificar", status: "unclassified,pending_review" },
-  { id: "unauthorized", label: "No autorizado", status: "unauthorized" },
-  { id: "exception", label: "Excepciones", status: "exception" },
-] as const;
-
-/** Cola de clasificación rápida (panel oscuro): autoriza o rechaza lo más instalado de lo pendiente. */
-function ClassifyQueue({ data, canWrite, onShowAll }: { data: DashboardData; canWrite: boolean; onShowAll: () => void }) {
-  const queue = data.software.queue ?? [];
-  const [rejecting, setRejecting] = useState<RankedProduct | null>(null);
-  const decide = useAction(({ id, status }: { id: number; status: string }) => api.send<{ updated: number }>("POST", "/software/bulk-update",
-    { product_ids: [id], authorization_status: status, reason: "Clasificación rápida desde la cola" }), {
-    success: "Clasificación registrada", invalidate: [["software"], ["dashboard"], ["alerts"], ["alerts-count"]],
-    onSuccess: () => setRejecting(null),
-  });
+// ------------------------------------------------------------------ KPI visuales
+function CatalogSummary({ data }: { data: DashboardData }) {
+  const sw = data.software;
+  const by = sw.by_status;
+  const pending = (by.unclassified ?? 0) + (by.pending_review ?? 0);
+  const policy = [
+    { label: "Autorizadas", value: (by.authorized ?? 0) + (by.exception ?? 0), strokeClass: "stroke-chart-1", className: "", dot: "authorized" as const },
+    { label: "Con condiciones", value: by.conditional ?? 0, strokeClass: "stroke-chart-2", className: "", dot: "conditional" as const },
+    { label: "No autorizadas", value: by.unauthorized ?? 0, strokeClass: "stroke-signal-fill", className: "", dot: "unauthorized" as const },
+    { label: "Por decidir", value: pending, strokeClass: "stroke-chart-3", className: "", dot: "pending" as const },
+  ];
+  const spread = sw.versions_spread;
+  const maxV = Math.max(1, ...(spread?.top ?? []).map((t) => t.versions));
+  const components = sw.components ?? 0;
   return (
-    <section aria-label="Cola de clasificación"
-      className="flex min-w-0 flex-[1_1_24rem] flex-col gap-4 rounded-panel border border-[#1C1917] bg-[#1C1917] p-6 text-[#F3F2F0]">
-      <div className="flex items-center justify-between gap-2">
-        <p className="eyebrow text-[#A39E98]">Cola de clasificación</p>
-        <span className="font-mono text-2xs text-[#FF8A5C]">{data.software.pending} PENDIENTES</span>
-      </div>
-      <h2 className="disp text-lg font-semibold tracking-[-0.02em]">Decide qué se puede usar</h2>
-      {queue.length === 0 ? <p className="text-[13px] text-[#B5B0AA]">No hay aplicaciones pendientes de clasificar.</p> : (
-        <ul className="border-t border-[#33302D]">
-          {queue.map((q) => (
-            <li key={q.id} className="flex flex-wrap items-center gap-2.5 border-b border-[#33302D] py-3 last:border-b-0">
-              <div className="min-w-0 flex-[1_1_10rem]">
-                <Link to={`/software/${q.id}`} className="block truncate text-[13px] font-medium hover:underline hover:underline-offset-4" title={q.name}>{q.name}</Link>
-                <p className="font-mono text-2xs uppercase text-[#A39E98]">{[q.publisher, `${q.devices} ${q.devices === 1 ? "equipo" : "equipos"}`].filter(Boolean).join(" · ")}</p>
-              </div>
-              {canWrite && <>
-                <button type="button" onClick={() => setRejecting(q)} disabled={decide.isPending}
-                  className="min-h-8 rounded-md border border-[#3A3734] px-3 text-xs font-medium text-[#D6D3CF] transition-colors hover:border-[#A39E98] hover:text-white disabled:opacity-50">
-                  Rechazar</button>
-                <button type="button" onClick={() => decide.mutate({ id: q.id, status: "authorized" })} disabled={decide.isPending}
-                  className="min-h-8 rounded-md bg-[#F3F2F0] px-3 text-xs font-medium text-[#141312] transition-opacity hover:opacity-90 disabled:opacity-50">
-                  Autorizar</button>
-              </>}
+    <KpiStrip label="Resumen del catálogo" className="mb-6">
+      <Kpi label="Política">
+        <div className="flex items-center gap-4">
+          <Donut segments={policy} center={fmtNumber(sw.products)} caption="aplicaciones"
+            label={policy.map((p) => `${p.value} ${p.label.toLowerCase()}`).join(", ")} />
+          <Legend className="flex-1" items={policy.map((p) => ({ label: p.label, value: p.value, tone: p.dot === "unauthorized" ? "signal" : undefined,
+            swatch: <StatusDot kind={p.dot} size="sm" /> }))} />
+        </div>
+      </Kpi>
+      <Kpi label="Versiones dispersas">
+        <BigNum value={spread?.count ?? 0}>apps con 5 o más versiones</BigNum>
+        <ul className="flex flex-col gap-2 text-xs">
+          {(spread?.top ?? []).map((t) => (
+            <li key={t.id} className="grid grid-cols-[minmax(0,1fr)_5.5rem_1.5rem] items-center gap-2.5">
+              <Link to={`/software/${t.id}?tab=versiones`} className="truncate text-fg-2 hover:underline">{t.name}</Link>
+              <Bar value={t.versions} max={maxV} />
+              <b className="disp text-right">{t.versions}</b>
             </li>
           ))}
         </ul>
+      </Kpi>
+      <Kpi label="Novedades · 30 días">
+        <BigNum value={`+${sw.new_30d ?? 0}`}>nuevas · −{sw.gone_30d ?? 0} desaparecidas</BigNum>
+        <Spark values={sw.new_daily ?? []} height={44} label="Aplicaciones nuevas por día en los últimos 30 días" />
+      </Kpi>
+      <Kpi label="Qué se muestra" footer={`${fmtNumber(components)} componentes, drivers y runtimes ocultos por defecto`}>
+        <BigNum value={fmtNumber(sw.products)}>de {fmtNumber(sw.products + components)} paquetes</BigNum>
+        <StackBar label={`${sw.products} aplicaciones relevantes y ${components} componentes`} segments={[
+          { label: "Aplicaciones", value: sw.products, className: "bg-chart-1" },
+          { label: "Componentes", value: components, className: HATCH },
+        ]} />
+      </Kpi>
+    </KpiStrip>
+  );
+}
+
+// ------------------------------------------------------------------ Por decidir: una fila con desplazamiento lateral
+function DecisionLane({ queue, total, canWrite, fleet }: { queue: QueueProduct[]; total: number; canWrite: boolean; fleet: number }) {
+  const { classify, busy } = useClassify();
+  const lane = useRef<HTMLDivElement>(null);
+  const scroll = (dir: number) => lane.current?.scrollBy({ left: dir * 316, behavior: "smooth" });
+  const decide = (q: QueueProduct, status: string) => classify([{ id: q.id, name: q.name, status: q.status ?? "unclassified" }], status);
+  const age = (v?: string | null) => {
+    const d = parseUtc(v);
+    if (!d) return null;
+    const days = Math.floor((Date.now() - d.getTime()) / 864e5);
+    return days < 7 ? "NUEVA" : `${days} DÍAS`;
+  };
+  return (
+    <section aria-label="Por decidir" className="mb-6 flex flex-col gap-3.5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="disp text-lg font-semibold">Por decidir
+          <span className="font-sans text-sm font-normal text-muted"> · {fmtNumber(total)} {total === 1 ? "aplicación" : "aplicaciones"}, ordenadas por equipos afectados</span></h2>
+        {queue.length > 1 && (
+          <div className="flex gap-1.5">
+            <Button variant="secondary" aria-label="Anterior" onClick={() => scroll(-1)}><ChevronLeft className="size-4" /></Button>
+            <Button variant="secondary" aria-label="Siguiente" onClick={() => scroll(1)}><ChevronRight className="size-4" /></Button>
+          </div>
+        )}
+      </div>
+      {queue.length === 0 ? (
+        <p className="rounded-panel border border-dashed border-border-strong p-6 text-center text-sm text-muted">Todo el catálogo está clasificado.</p>
+      ) : (
+        <div ref={lane} role="list" className="flex snap-x snap-mandatory gap-3 overflow-x-auto pb-2.5">
+          {queue.map((q) => (
+            <article key={q.id} role="listitem" tabIndex={0} aria-label={`${q.name}: ${q.devices} equipos. Teclas A, C o N para decidir.`}
+              onKeyDown={(e) => {
+                if (!canWrite || busy || e.target !== e.currentTarget) return;
+                const s = ({ a: "authorized", c: "conditional", n: "unauthorized" } as Record<string, string>)[e.key.toLowerCase()];
+                if (s) { e.preventDefault(); decide(q, s); }
+              }}
+              className="card flex w-[300px] shrink-0 snap-start flex-col gap-3 p-[18px] outline-none focus-visible:ring-2 focus-visible:ring-fg/60">
+              <div className="flex items-start gap-3">
+                <StatusDot kind="pending" className="mt-1" />
+                <div className="min-w-0 flex-1">
+                  <Link to={`/software/${q.id}`} className="block truncate text-[15px] font-semibold hover:underline hover:underline-offset-4" title={q.name}>{q.name}</Link>
+                  <p className="truncate text-xs text-muted">{q.publisher ?? "Editor desconocido"}</p>
+                </div>
+                {age(q.first_seen_at) && <span className="code shrink-0 text-2xs text-muted">{age(q.first_seen_at)}</span>}
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="disp text-[15px] font-semibold">{q.devices}</span>
+                <span className="flex-1"><Bar value={q.devices} max={fleet} /></span>
+                <span className="text-xs text-muted">{q.devices === 1 ? "equipo" : "equipos"}</span>
+              </div>
+              <p className="line-clamp-2 min-h-8 text-xs text-muted">{q.departments?.length ? q.departments.join(", ") : "Sin instalaciones vigentes"}</p>
+              {canWrite && (
+                <div className="mt-auto flex gap-1.5">
+                  <Button size="sm" disabled={busy} onClick={() => decide(q, "authorized")}>Autorizar</Button>
+                  <Button size="sm" disabled={busy} onClick={() => decide(q, "conditional")}>Con condiciones</Button>
+                  <Button size="sm" disabled={busy} title={`Abrirá ${q.devices} ${q.devices === 1 ? "alerta" : "alertas"}`}
+                    className="hover:!border-signal hover:!text-signal" onClick={() => decide(q, "unauthorized")}>No</Button>
+                </div>
+              )}
+            </article>
+          ))}
+        </div>
       )}
-      {data.software.pending > queue.length && (
-        <button type="button" onClick={onShowAll}
-          className="mt-auto self-start text-xs text-[#D6D3CF] underline decoration-[#5E5954] underline-offset-4 hover:decoration-[#D6D3CF]">
-          Ver los {data.software.pending} pendientes</button>
-      )}
-      <ConfirmDialog open={!!rejecting} onClose={() => setRejecting(null)} title="Marcar como no autorizado" danger
-        confirmLabel="No autorizar" busy={decide.isPending}
-        onConfirm={() => rejecting && decide.mutate({ id: rejecting.id, status: "unauthorized" })}>
-        Se abrirá una alerta por cada equipo que tenga instalado <strong>{rejecting?.name}</strong>.
-      </ConfirmDialog>
     </section>
   );
 }
 
-function SoftwareSummary({ data, canWrite, onShowPending }: { data: DashboardData; canWrite: boolean; onShowPending: () => void }) {
-  const sw = data.software;
-  const auth = sw.by_status.authorized ?? 0;
-  return (
-    <div className="mb-6 flex flex-col gap-6">
-      <StatStrip label="Catálogo por estado">
-        <Stat label="Autorizado" value={fmtNumber(auth)} hint={`${fmtPct(pct(auth, sw.products))} % de las aplicaciones`} />
-        <Stat label="Componentes" value={fmtNumber(sw.components ?? 0)} hint="paquetes de Microsoft / Windows" />
-        <Stat label="Por clasificar" value={fmtNumber(sw.pending)} tone={sw.pending ? "warn" : undefined}
-          hint={sw.pending ? "pendientes de autorizar o revisar" : "todo clasificado"} />
-        <Stat label="No autorizado" value={fmtNumber(sw.unauthorized_products)} tone={sw.unauthorized_products ? "danger" : undefined}
-          hint={sw.unauthorized_products ? "con alerta en cada equipo que lo tiene" : "ninguna aplicación bloqueada"} />
-      </StatStrip>
-      <div className="flex flex-wrap gap-6">
-        <Panel title="Más instalado" className="flex-[2_1_30rem]"
-          aside={<span className="text-[13px] text-muted">equipos con la aplicación, de {data.devices.total}</span>}>
-          <RankedList items={sw.top ?? []} total={data.devices.total} />
-        </Panel>
-        <ClassifyQueue data={data} canWrite={canWrite} onShowAll={onShowPending} />
-      </div>
-    </div>
-  );
-}
+// ------------------------------------------------------------------ Página
+type ChipId = "all" | Policy;
 
 export default function Software() {
   const can = useCan();
-  const { values, set, page } = useUrlState(["q", "sort", "status", "category", "relevant", "department_id", "view"] as const);
+  const nav = useNavigate();
+  const { values, set } = useUrlState(["q", "sort", "status", "category", "relevant", "department_id", "view", "group"] as const);
   const [selected, setSelected] = useState<Set<number | string>>(new Set());
   const [classifying, setClassifying] = useState(false);
-  const tableRef = useRef<HTMLDivElement>(null);
-  // Mismo filtro que la URL actual no navega: además de filtrar, se lleva al usuario a la tabla.
-  const showPending = () => {
-    set({ status: "unclassified,pending_review" });
-    tableRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-  };
   const depts = useDepartments().data?.items ?? [];
+  const actions = useProductActions();
   const view = (values.view ?? "all") as keyof typeof VIEWS;
   const relevant = values.relevant ?? "true";
-  const params = { q: values.q, sort: values.sort, status: values.status, category: values.category,
-    relevant: relevant === "all" ? undefined : relevant, department_id: values.department_id, ...VIEWS[view].params,
-    page, page_size: PAGE_SIZE };
+  const grouped = values.group !== "list";
+  // Compatibilidad con enlaces antiguos (?status=unclassified,pending_review).
+  const chip: ChipId = !values.status ? "all" : values.status.includes("unclassified") || values.status.includes("pending") ? "pending"
+    : (values.status as ChipId);
+  const params = { q: values.q, sort: values.sort, category: values.category,
+    relevant: relevant === "all" ? undefined : relevant, department_id: values.department_id, ...VIEWS[view].params, page_size: ALL };
   const q = useQuery({ queryKey: ["software", params], queryFn: () => api.get<Paged<Product>>("/software", params),
     placeholderData: (prev) => prev });
   const dash = useDashboard().data;
   const fleet = Math.max(1, dash?.devices.total ?? 1);
+  const all = useMemo(() => q.data?.items ?? [], [q.data]);
+  const rows = useMemo(() => (chip === "all" ? all : all.filter((p) => policyOf(p.authorization_status) === chip)), [all, chip]);
   const cols = useMemo(() => columns(fleet), [fleet]);
-  const tab = STATUS_TABS.find((t) => (t.status ?? "") === (values.status ?? ""))?.id ?? "all";
-  const by = dash?.software.by_status ?? {};
-  const tabCount: Record<string, number> | undefined = dash && {
-    all: dash.software.products, authorized: by.authorized ?? 0, conditional: by.conditional ?? 0, pending: dash.software.pending,
-    unauthorized: by.unauthorized ?? 0, exception: by.exception ?? 0,
+  const counts = useMemo(() => ORDER.reduce<Record<Policy, number>>((a, k) => ({ ...a, [k]: all.filter((p) => policyOf(p.authorization_status) === k).length }),
+    { unauthorized: 0, pending: 0, conditional: 0, authorized: 0 }), [all]);
+
+  const SUMMARY: Record<Policy, string> = {
+    unauthorized: dash?.alerts.unauthorized_devices ? `alertas abiertas en ${dash.alerts.unauthorized_devices} equipos` : "sin alertas abiertas",
+    pending: "decide arriba, en «Por decidir»",
+    conditional: "uso permitido solo con aprobación",
+    authorized: "base corporativa",
   };
+  const groups: TableGroup<Product>[] | undefined = grouped ? ORDER
+    .map((k) => ({ key: k, label: GROUP_LABEL[k], rows: rows.filter((p) => policyOf(p.authorization_status) === k),
+      lead: <StatusDot kind={k} />, summary: SUMMARY[k], defaultCollapsed: k === "authorized" }))
+    .filter((g) => g.rows.length > 0) : undefined;
+  const like = (p: Product): ProductLike => ({ id: p.id, name: p.name, status: p.authorization_status, devices: p.devices });
 
   return (
     <>
-      <PageHeader eyebrow="Inventario · Software" title="Catálogo de software"
-        description={dash ? `${fmtNumber(dash.software.products)} aplicaciones y ${fmtNumber(dash.software.installations)} instalaciones en ${dash.devices.total} equipos. Cada producto existe una vez, con sus versiones.`
-          : "Catálogo global normalizado: cada producto existe una vez, con sus versiones e instalaciones."}
-        actions={<>
-          <Button icon={<Download className="size-4" />}
-            onClick={() => api.download("/software/export", { format: "xlsx", q: values.q, status: values.status,
-              category: values.category, relevant: params.relevant, department_id: values.department_id })}>Excel por departamento</Button>
-          {can.write && !!dash?.software.pending && (
-            <Button variant="primary" onClick={showPending}>Clasificar pendientes</Button>
-          )}
-        </>} />
-      {dash && <SoftwareSummary data={dash} canWrite={can.write} onShowPending={showPending} />}
-      <div ref={tableRef} className="scroll-mt-20">
+      <ScreenHeader eyebrow="Inventario · Software" title={`${fmtNumber(dash?.software.products ?? all.length)} aplicaciones`}
+        sub={dash ? `en ${dash.devices.total} equipos` : undefined}
+        actions={<Button icon={<Download className="size-4" />}
+          onClick={() => api.download("/software/export", { format: "xlsx", q: values.q, category: values.category,
+            relevant: params.relevant, department_id: values.department_id })}>Excel por departamento</Button>} />
+      {dash && <CatalogSummary data={dash} />}
+      {dash && <DecisionLane queue={dash.software.queue ?? []} total={dash.software.pending} canWrite={can.write} fleet={fleet} />}
       <DataTable
-        header={<Tabs bare label="Autorización" value={tab} onChange={(id) => set({ status: STATUS_TABS.find((t) => t.id === id)?.status ?? null })}
-          tabs={STATUS_TABS.map((t) => ({ id: t.id, label: t.label, count: tabCount?.[t.id] }))} />}
-        columns={cols} rows={q.data?.items} total={q.data?.total} rowKey={(p) => p.id}
+        columns={cols} rows={rows} groups={groups} rowKey={(p) => p.id}
         loading={q.isLoading} error={q.error} retry={q.refetch}
-        page={page} pageSize={PAGE_SIZE} onPage={(p) => set({ page: p }, false)}
         sort={values.sort} onSort={(s) => set({ sort: s })}
         search={values.q ?? ""} onSearch={(s) => set({ q: s })} searchPlaceholder="Producto o editor…"
         storageKey="software" selectable={can.write} selected={selected} onSelectedChange={setSelected}
+        onRowClick={(p) => nav(`/software/${p.id}`)}
+        rowMenu={(p, sel) => ({ title: sel.length > 1 ? `${sel.length} aplicaciones` : p.name, entries: actions.entries(like(p), sel.map(like)) })}
         bulkActions={<Button size="sm" icon={<Tags className="size-4" />} onClick={() => setClassifying(true)}>Clasificar</Button>}
+        footer="Clic derecho sobre cualquier aplicación, o el botón ⋯, para ver sus acciones. Con varias seleccionadas, la acción se aplica a todas."
+        header={<div className="py-3">
+          <FilterChips label="Política" value={chip} onChange={(v) => set({ status: v === "all" ? null : v })} options={[
+            { id: "all", label: "Todas", count: all.length },
+            ...ORDER.map((k) => ({ id: k, label: GROUP_LABEL[k], count: counts[k], dot: k })),
+          ]} />
+        </div>}
         toolbar={<>
+          <Segmented label="Agrupar" value={grouped ? "policy" : "list"} onChange={(v) => set({ group: v === "policy" ? null : "list" })}
+            options={[{ id: "policy", label: "Por política" }, { id: "list", label: "Lista" }]} />
           <select aria-label="Vista" className="field w-auto" value={view} onChange={(e) => set({ view: e.target.value === "all" ? null : e.target.value })}>
             {(Object.keys(VIEWS) as (keyof typeof VIEWS)[]).map((k) => <option key={k} value={k}>{VIEWS[k].label}</option>)}
           </select>
@@ -202,7 +269,7 @@ export default function Software() {
           </select>
         </>}
       />
-      </div>
+      {actions.dialogs}
       {classifying && <BulkClassify ids={[...selected].map(Number)} onClose={() => setClassifying(false)}
         onDone={() => { setClassifying(false); setSelected(new Set()); }} />}
     </>
