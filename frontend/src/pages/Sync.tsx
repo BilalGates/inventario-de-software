@@ -1,14 +1,17 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Copy, FileUp, LogIn, Play, RotateCcw } from "lucide-react";
+import { Copy, FileUp, LogIn, MoreHorizontal, Play, RotateCcw } from "lucide-react";
 import { useEffect, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { RunStatusBadge } from "@/components/badges";
+import { ContextMenu, useContextMenu, type MenuEntry } from "@/components/ContextMenu";
 import { DataTable, type Column } from "@/components/DataTable";
+import { Bar, BigNum, FilterChips, HATCH, Kpi, KpiStrip, ScreenHeader, StackBar, StatusDot, groupByDay, hhmm, type DotKind } from "@/components/kit";
 import { UploadDialog } from "@/components/UploadDialog";
-import { Badge, Button, Card, ConfirmDialog, DefinitionList, ErrorState, Modal, Notice, PageHeader, Spinner } from "@/components/ui";
+import { Button, ConfirmDialog, DefinitionList, ErrorState, Modal, Notice, Spinner, cx, useToast } from "@/components/ui";
 import { api } from "@/lib/api";
 import { useCan } from "@/lib/auth";
-import { CHANGE_LABEL, TRIGGER_LABEL, fmtDateTime, fmtRelative } from "@/lib/format";
+import { useDashboard, type DashboardData } from "@/lib/dashboard";
+import { CHANGE_LABEL, TRIGGER_LABEL, fmtDateTime, fmtRelative, parseUtc } from "@/lib/format";
 import { useAction, useUrlState } from "@/lib/hooks";
 import type { DeviceCodeStart, DeviceCodeStatus, Paged, Run, Source } from "@/lib/types";
 
@@ -20,74 +23,188 @@ const STAT_LABEL: Record<string, string> = {
   graph_requests: "Peticiones a Graph", graph_throttled: "Limitaciones (429)", programs: "Programas", parse_errors: "Líneas no reconocidas",
 };
 
+const runDot = (s: Run["status"]): DotKind =>
+  s === "succeeded" ? "success" : s === "failed" ? "failed" : s === "partial" ? "warning" : s === "cancelled" ? "muted" : "running";
+
+/** Próxima ejecución de la programación mensual (día y hora en UTC). */
+function nextRun(day: number, hour: number) {
+  const now = new Date();
+  let d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), day, hour));
+  if (d <= now) d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, day, hour));
+  return d;
+}
+const dateFmt = new Intl.DateTimeFormat("es-ES", { day: "numeric", month: "short" });
+
+function SyncSummary({ dash, runs, schedule }: { dash: DashboardData | undefined; runs: Run[];
+  schedule?: { enabled: boolean; day: number; hour: number } }) {
+  const hb = dash?.worker_heartbeat?.at;
+  const age = hb ? Date.now() - (parseUtc(hb)?.getTime() ?? 0) : null;
+  const limit = ((dash?.worker_interval_minutes ?? 1) * 2 + 10) * 60_000;
+  const down = age === null || age > limit;
+  const last20 = runs.filter((r) => !["queued", "running"].includes(r.status)).slice(0, 20);
+  const okRuns = last20.filter((r) => r.status === "succeeded").length;
+  const next = schedule?.enabled ? nextRun(schedule.day, schedule.hour) : null;
+  const cov = dash?.devices.by_source;
+  const total = dash?.devices.total ?? 0;
+  const manual = cov?.manual ?? 0;
+  const daysToNext = next ? Math.ceil((next.getTime() - Date.now()) / 864e5) : 0;
+  return (
+    <KpiStrip label="Estado de la sincronización" className="mb-6">
+      <Kpi label="Worker" footer={hb ? `Último latido ${fmtRelative(hb)} · pasa cada ${dash?.worker_interval_minutes ?? 1} min` : "Nunca se ha ejecutado"}>
+        <p className="disp flex items-center gap-2.5 text-[30px] font-semibold leading-none">
+          <StatusDot kind={down ? "failed" : "success"} />{down ? "Parado" : "Activo"}</p>
+      </Kpi>
+      <Kpi label="Próxima programada" footer={next ? `Mensual · día ${schedule!.day} a las ${String(schedule!.hour).padStart(2, "0")}:00 UTC` : undefined}>
+        {next ? <>
+          <BigNum value={dateFmt.format(next)}>{daysToNext === 1 ? "mañana" : `faltan ${daysToNext} días`}</BigNum>
+          <Bar value={Math.max(0, 30 - daysToNext)} max={30} />
+        </> : <p className="text-sm text-muted">Programación desactivada</p>}
+      </Kpi>
+      <Kpi label={`Últimas ${last20.length} ejecuciones`}>
+        <BigNum value={okRuns}>{`correctas · ${last20.length - okRuns} con problemas`}</BigNum>
+        <div role="img" aria-label={`${okRuns} correctas y ${last20.length - okRuns} con problemas`} className="flex gap-[3px]">
+          {[...last20].reverse().map((r) => <StatusDot key={r.id} kind={runDot(r.status)} className="!h-5 flex-1 !rounded-[3px]" />)}
+        </div>
+      </Kpi>
+      <Kpi label="Cobertura" footer={manual ? `${manual} con inventario manual` : undefined}>
+        <BigNum value={total - manual}>de {total} con fuente automática</BigNum>
+        <StackBar label="Cobertura por fuente" segments={[
+          { label: "Con fuente automática", value: total - manual, className: "bg-chart-1" },
+          { label: "Manual", value: manual, className: HATCH },
+        ]} />
+      </Kpi>
+    </KpiStrip>
+  );
+}
+
 export default function Sync() {
   const can = useCan();
   const [params, setParams] = useSearchParams();
   const runId = params.get("run");
   const [upload, setUpload] = useState<"panda" | "intune" | null>(null);
   const { values, set, page } = useUrlState(["source", "status"] as const);
+  const dash = useDashboard().data;
+  const settings = useQuery({ queryKey: ["settings"], queryFn: () => api.get<{ "schedule.monthly"?: { enabled: boolean; day: number; hour: number } }>("/settings") });
   const sources = useQuery({ queryKey: ["sources"], queryFn: () => api.get<Source[]>("/sources"), refetchInterval: 15_000 });
-  const listParams = { source: values.source, status: values.status, page, page_size: 25 };
+  const listParams = { source: values.source, status: values.status, page, page_size: 50 };
   const runs = useQuery({ queryKey: ["runs", listParams], queryFn: () => api.get<Paged<Run>>("/runs", listParams),
     refetchInterval: (q) => (q.state.data?.items.some((r) => r.status === "queued" || r.status === "running") ? 3_000 : 20_000),
     placeholderData: (p) => p });
+  const recent = useQuery({ queryKey: ["runs", "recent"], queryFn: () => api.get<Paged<Run>>("/runs", { page_size: 20 }) });
   const start = useAction((source: string) => api.send<Run>("POST", "/runs", { source }), {
     success: "Sincronización en cola", invalidate: [["runs"], ["sources"]],
   });
+  const retry = useAction((id: number) => api.send<Run>("POST", `/runs/${id}/retry`), { success: "Reintento en cola", invalidate: [["runs"]] });
+  const toast = useToast();
+  const ctx = useContextMenu();
+  const go = useNavigate();
+  const visibleSources = (sources.data ?? []).filter((s) => s.code !== "legacy");
+  const apiSources = visibleSources.filter((s) => s.kind === "api" && s.enabled && s.configured);
+  const lastOk = (recent.data?.items ?? []).find((r) => r.status === "succeeded");
+  const hb = dash?.worker_heartbeat?.at;
+  const workerDown = !hb || Date.now() - (parseUtc(hb)?.getTime() ?? 0) > ((dash?.worker_interval_minutes ?? 1) * 2 + 10) * 60_000;
+  const nav = (src: string) => set({ source: src, page: null });
+
+  const sourceMenu = (s: Source): MenuEntry[] => [
+    ...(can.write && s.enabled && s.kind === "api" ? [{ label: "Sincronizar ahora", disabled: !s.configured, onSelect: () => start.mutate(s.code) }] : []),
+    ...(can.write && s.enabled ? [{ label: s.code === "panda" ? "Importar exportación…" : "Importar CSV…", onSelect: () => setUpload(s.code as "panda" | "intune") }] : []),
+    { label: "Ver sus ejecuciones", onSelect: () => nav(s.code) },
+    ...(s.last_error ? ["separator" as const, { label: "Copiar el último error", onSelect: () => navigator.clipboard?.writeText(s.last_error ?? "").then(() => toast("ok", "Error copiado")) }] : []),
+  ];
+  const sourceDot = (s: Source): DotKind => !s.enabled ? "muted" : s.last_run?.status === "failed" ? "failed"
+    : !s.last_success_at || Date.now() - (parseUtc(s.last_success_at)?.getTime() ?? 0) > 31 * 864e5 ? "warning" : "success";
+  const sourceNote = (s: Source) => !s.enabled ? "Desactivada" : s.kind === "api" && !s.configured ? "Sin conectar con Microsoft"
+    : s.last_error ? s.last_error : sourceDot(s) === "warning" ? (s.code === "panda" ? "Sin datos este mes: sube la exportación" : "Sin datos recientes") : null;
+
   const cols: Column<Run>[] = [
-    { id: "id", header: "#", cell: (r) => <button className="font-mono text-xs text-accent hover:underline" onClick={() => setParams({ run: String(r.id) })}>{r.id}</button> },
-    { id: "src", header: "Fuente", cell: (r) => <span className="font-medium">{r.source_name}</span> },
+    { id: "id", header: "#", cell: (r) => <button className="code text-muted hover:text-fg hover:underline" onClick={() => setParams({ run: String(r.id) })}>{r.id}</button> },
+    { id: "src", header: "Fuente", cell: (r) => <span className="flex items-center gap-2.5 font-semibold"><StatusDot kind={runDot(r.status)} />{r.source_name}</span> },
     { id: "trg", header: "Origen", cell: (r) => <span className="block max-w-72 truncate text-muted" title={r.filename ?? undefined}>{TRIGGER_LABEL[r.trigger] ?? r.trigger}{r.filename && ` · ${r.filename}`}</span> },
     { id: "st", header: "Estado", cell: (r) => <RunStatusBadge status={r.status} /> },
     { id: "sum", header: "Resultado", cell: (r) => r.status === "running" && r.progress ? <span className="text-xs text-muted">{r.progress}</span>
-      : r.status === "failed" ? <span className="block max-w-80 truncate text-xs text-danger" title={r.error ?? ""}>{r.error}</span>
-      : r.stats?.devices_seen != null ? <span className="text-xs text-muted">{String(r.stats.devices_seen)} disp. · {String(r.stats.installs_seen ?? 0)} inst. · {String(r.stats.changes ?? 0)} cambios</span> : "—" },
+      : r.status === "failed" ? <span className="block max-w-80 truncate text-xs text-signal" title={r.error ?? ""}>{r.error}</span>
+      : r.stats?.devices_seen != null ? <span className="text-xs text-muted">{String(r.stats.devices_seen)} equipos · {String(r.stats.installs_seen ?? 0)} instalaciones · {String(r.stats.changes ?? 0)} cambios</span> : "—" },
     { id: "by", header: "Solicitada por", cell: (r) => <span className="text-muted">{r.requested_by}</span> },
-    { id: "at", header: "Fecha", cell: (r) => <span className="whitespace-nowrap text-muted" title={fmtDateTime(r.requested_at)}>{fmtRelative(r.requested_at)}</span> },
+    { id: "at", header: "Hora", cell: (r) => <span className="code whitespace-nowrap text-muted" title={fmtDateTime(r.requested_at)}>{hhmm(r.requested_at)}</span> },
   ];
 
   return (
     <>
-      <PageHeader eyebrow="Fuentes · Sincronización" title="Sincronización" description="Conectores, ejecuciones e importación de ficheros. Todas las ejecuciones las procesa el worker." />
-      {sources.isLoading ? <Spinner /> : sources.error ? <ErrorState error={sources.error} /> : (
-        <div className="mb-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {sources.data!.filter((s) => s.code !== "legacy").map((s) => (
-            <Card key={s.code} title={<span className="flex items-center gap-2">{s.name}
-              {!s.enabled && <Badge>Desactivada</Badge>}{s.kind === "api" && !s.configured && <Badge tone="warn">Sin conectar</Badge>}</span>}>
-              <DefinitionList items={[
-                ["Tipo", s.kind === "api" ? "API automática" : "Ficheros"], ["Prioridad", s.priority],
-                ["Última ejecución correcta", fmtRelative(s.last_success_at)],
-                ["Último estado", s.last_run ? <span key="r" className="flex flex-wrap items-center gap-1.5"><RunStatusBadge status={s.last_run.status} />
-                  {s.last_run.progress && <span className="text-xs text-muted">{s.last_run.progress}</span>}</span> : "—"],
-                ["Dispositivos identificados", s.devices], ["Equipos con software", s.devices_with_software],
-              ]} />
-              {s.last_error && <p className="mt-3 line-clamp-3 text-xs text-danger" title={s.last_error}>{s.last_error}</p>}
-              {s.code === "intune" && <GraphConnection source={s} />}
-              {can.write && s.enabled && (
-                <div className="mt-4 flex flex-wrap gap-2 border-t border-border pt-3">
-                  {s.kind === "api" && <Button size="sm" variant="primary" icon={<Play className="size-3.5" />} disabled={!s.configured}
-                    loading={start.isPending && start.variables === s.code} onClick={() => start.mutate(s.code)}
-                    title={s.configured ? undefined : "Conecte con Microsoft para sincronizar"}>Sincronizar ahora</Button>}
-                  <Button size="sm" icon={<FileUp className="size-3.5" />} onClick={() => setUpload(s.code as "panda" | "intune")}>
-                    {s.code === "panda" ? "Importar exportación" : "Importar CSV"}</Button>
-                </div>
-              )}
-              {s.code === "panda" && <p className="mt-3 text-xs text-muted">Suba la exportación de cada equipo desde aquí. API de WatchGuard: pendiente de confirmar licencia.</p>}
-            </Card>
-          ))}
-        </div>
-      )}
-      <h2 className="mb-2 text-sm font-semibold">Historial de ejecuciones</h2>
-      <DataTable columns={cols} rows={runs.data?.items} total={runs.data?.total} rowKey={(r) => r.id} loading={runs.isLoading} error={runs.error}
-        page={page} pageSize={25} onPage={(p) => set({ page: p }, false)}
-        toolbar={<>
-          <select aria-label="Fuente" className="field w-auto" value={values.source ?? ""} onChange={(e) => set({ source: e.target.value || null })}>
-            <option value="">Todas las fuentes</option><option value="intune">Intune</option><option value="panda">Panda</option>
-          </select>
-          <select aria-label="Estado" className="field w-auto" value={values.status ?? ""} onChange={(e) => set({ status: e.target.value || null })}>
-            <option value="">Cualquier estado</option><option value="failed,partial">Con problemas</option><option value="queued,running">En curso</option><option value="succeeded">Completadas</option>
-          </select>
+      <ScreenHeader eyebrow="Fuentes · Sincronización"
+        title={lastOk ? `Última recogida ${fmtRelative(lastOk.finished_at ?? lastOk.requested_at)}` : "Sin recogidas completas"}
+        sub={workerDown ? "· el worker está parado" : "· el worker está activo"}
+        actions={can.write && <>
+          <Button icon={<FileUp className="size-4" />} onClick={() => setUpload("panda")}>Importar fichero</Button>
+          <Button variant="primary" icon={<Play className="size-4" />} disabled={apiSources.length === 0} loading={start.isPending}
+            onClick={() => apiSources.forEach((s) => start.mutate(s.code))}>Sincronizar todo</Button>
         </>} />
+      <SyncSummary dash={dash} runs={recent.data?.items ?? []} schedule={settings.data?.["schedule.monthly"]} />
+
+      <section aria-label="Fuentes" className="card mb-6 overflow-hidden">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3.5">
+          <h2 className="font-semibold">Fuentes</h2>
+          <span className="text-xs text-muted">Si dos fuentes discrepan, gana la de prioridad más baja (arriba)</span>
+        </div>
+        {sources.isLoading ? <Spinner /> : sources.error ? <ErrorState error={sources.error} /> : (
+          <ul>
+            {[...visibleSources].sort((a, b) => a.priority - b.priority).map((s) => (
+              <li key={s.code} className="border-t border-border first:border-t-0"
+                onContextMenu={(e) => ctx.openAt(e, sourceMenu(s), s.name)}>
+                <div className="grid grid-cols-1 items-center gap-x-6 gap-y-2 px-4 py-4 transition-colors hover:bg-subtle md:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,0.7fr)_minmax(0,1.6fr)_auto_auto]">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <StatusDot kind={sourceDot(s)} />
+                    <div className="min-w-0">
+                      <p className="truncate text-[15px] font-semibold">{s.name}</p>
+                      <p className="text-xs text-muted">{s.kind === "api" ? "API automática" : "Ficheros"} · prioridad {s.priority}</p>
+                    </div>
+                  </div>
+                  <div className="text-[13px]"><p className="eyebrow">Última correcta</p>{fmtRelative(s.last_success_at)}</div>
+                  <div className="text-[13px]"><p className="eyebrow">Equipos</p><b className="disp">{s.devices}</b></div>
+                  <p className={cx("line-clamp-2 text-[13px]", s.last_error || sourceDot(s) === "warning" ? "text-signal" : "text-muted")}
+                    title={sourceNote(s) ?? undefined}>{sourceNote(s) ?? `${s.devices_with_software} con software`}</p>
+                  <div className="flex gap-2">
+                    {can.write && s.enabled && (s.kind === "api"
+                      ? <Button size="sm" variant="primary" icon={<Play className="size-3.5" />} disabled={!s.configured}
+                          loading={start.isPending && start.variables === s.code} onClick={() => start.mutate(s.code)}
+                          title={s.configured ? undefined : "Conecte con Microsoft para sincronizar"}>Sincronizar ahora</Button>
+                      : <Button size="sm" icon={<FileUp className="size-3.5" />} onClick={() => setUpload(s.code as "panda" | "intune")}>
+                          {s.code === "panda" ? "Importar exportación" : "Importar CSV"}</Button>)}
+                  </div>
+                  <button type="button" aria-label={`Acciones de ${s.name}`} aria-haspopup="menu"
+                    onClick={(e) => ctx.openFrom(e.currentTarget, sourceMenu(s), s.name)}
+                    className="inline-flex size-9 items-center justify-center justify-self-end rounded-md text-muted hover:bg-surface hover:text-fg">
+                    <MoreHorizontal className="size-4" /></button>
+                </div>
+                {s.code === "intune" && <div className="px-4 pb-4 pl-[46px]"><GraphConnection source={s} /></div>}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <DataTable columns={cols} rows={runs.data?.items} total={runs.data?.total} rowKey={(r) => r.id} loading={runs.isLoading} error={runs.error}
+        groups={groupByDay(runs.data?.items ?? [], (r) => r.requested_at)}
+        page={page} pageSize={50} onPage={(p) => set({ page: p }, false)}
+        onRowClick={(r) => setParams({ run: String(r.id) })}
+        rowMenu={(r) => ({ title: `Ejecución #${r.id}`, entries: [
+          { label: "Ver detalle", hint: "Intro", onSelect: () => setParams({ run: String(r.id) }) },
+          ...(can.write && ["failed", "partial"].includes(r.status) ? [{ label: "Reintentar", onSelect: () => retry.mutate(r.id) }] : []),
+          { label: "Ver cambios que produjo", onSelect: () => go("/auditoria?tab=cambios") },
+          ...(r.error ? [{ label: "Copiar el error", onSelect: () => navigator.clipboard?.writeText(r.error ?? "").then(() => toast("ok", "Error copiado")) }] : []),
+        ] })}
+        header={<div className="flex flex-wrap items-center gap-3 py-3">
+          <h2 className="mr-2 font-semibold">Ejecuciones</h2>
+          <FilterChips label="Estado" value={values.status ?? "all"} onChange={(v) => set({ status: v === "all" ? null : v })} options={[
+            { id: "all", label: "Todas" },
+            { id: "succeeded", label: "Correctas", dot: "success" },
+            { id: "failed,partial", label: "Con problemas", dot: "failed" },
+            { id: "queued,running", label: "En curso", dot: "running" },
+          ]} />
+          <FilterChips label="Fuente" value={values.source ?? "all"} onChange={(v) => set({ source: v === "all" ? null : v })} options={[
+            { id: "all", label: "Todas las fuentes" }, { id: "intune", label: "Intune" }, { id: "panda", label: "Panda" },
+          ]} />
+        </div>} />
+      <ContextMenu menu={ctx.menu} onClose={ctx.close} />
       {upload && <UploadDialog source={upload} onClose={() => setUpload(null)} />}
       {runId && <RunDetail id={Number(runId)} onClose={() => { params.delete("run"); setParams(params); }} />}
     </>

@@ -27,7 +27,7 @@ from app.models import (
     SoftwareVersion,
     User,
 )
-from app.services import audit, graph_session
+from app.services import audit, fleet_health, graph_session
 from app.services.devices import apply_record, reassign, upsert_user
 from app.services.normalization import hostname_key
 from app.services.software import PolicyEvaluator
@@ -131,8 +131,11 @@ def list_devices(page: Page = Depends(), q: str | None = None, status: str | Non
                              .where(SoftwareInstallation.device_id.in_(ids), SoftwareInstallation.present.is_(True))
                              .group_by(SoftwareInstallation.device_id)).all()) if ids else {}
     sources = _sources(db, ids) if ids else {}
-    return {"total": total, "items": [serialize(d, stale_days, {"software_count": counts.get(d.id, 0),
-                                                                "sources": sources.get(d.id, [])}) for d in devices]}
+    bad = fleet_health.unauthorized_devices(db) if ids else set()
+    return {"total": total, "items": [serialize(d, stale_days, {
+        "software_count": counts.get(d.id, 0), "sources": sources.get(d.id, []),
+        "type_code": fleet_health.type_code(d), "unauthorized": d.id in bad,
+        "state": fleet_health.state(d, bad)}) for d in devices]}
 
 
 DEVICE_EXPORT_COLUMNS = [

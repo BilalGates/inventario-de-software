@@ -213,6 +213,25 @@ def product_installations(product_id: int, version: str | None = None, include_r
     return {"total": len(items), "items": items}
 
 
+@router.get("/{product_id}/installations/export")
+def export_product_installations(product_id: int, format: str = Query("xlsx", pattern="^(csv|xlsx)$"),
+                                 db: Session = Depends(get_db), user: CurrentUser = Reader):
+    """Equipos que tienen instalado el producto (menú de acciones del catálogo)."""
+    from app.api.software_report import AUTH_LABEL
+
+    data = product_installations(product_id, None, False, db, user)
+    p = db.get(SoftwareProduct, product_id)
+    rows = [{**i, "authorization": AUTH_LABEL.get(i["authorization_status"], i["authorization_status"])}
+            for i in data["items"]]
+    audit.record(db, user.upn, "export.software", "software_product", product_id,
+                 f"Exportación de las instalaciones de {p.name}")
+    db.commit()
+    return export_response(rows, [("device", "Equipo"), ("department", "Departamento"), ("user", "Usuario"),
+                                  ("version", "Versión"), ("source", "Fuente"), ("authorization", "Autorización"),
+                                  ("first_seen_at", "Primera detección"), ("last_seen_at", "Última detección")],
+                           f"instalaciones_{product_id}_{utcnow():%Y%m%d}", format)
+
+
 class ProductPatch(BaseModel):
     name: str | None = Field(None, min_length=1, max_length=300)
     category: str | None = None

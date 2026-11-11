@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import io
+import re
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
@@ -16,6 +17,7 @@ from app.api.common import Page, _csv_safe, export_response, not_found, paginate
 from app.api.routes.devices import DEVICE_EXPORT_COLUMNS, device_export_rows, freshness
 from app.api.software_report import NO_DEPARTMENT, Install, _header, _sheet_title, build_workbook
 from app.connectors.base import ConnectorError
+from app.connectors import intune_compliance
 from app.connectors.files import decode
 from app.connectors.graph_delegated import DeviceCodeLogin
 from app.core.config import get_settings
@@ -37,8 +39,9 @@ from app.models import (
     ReviewCase,
     SoftwareInstallation,
     SoftwareProduct,
+    SoftwareVersion,
 )
-from app.services import audit, graph_session, snapshots
+from app.services import audit, fleet_health, graph_session, snapshots
 from app.services import runs as run_service
 from app.services.bootstrap import get_setting
 from app.services.dispatch import wake_worker
@@ -442,6 +445,92 @@ def snapshot_report(snapshot_id: int, db: Session = Depends(get_db), user: Curre
                                       f'attachment; filename="inventario_{snap.period}_v{snap.version}.xlsx"'})
 
 
+@router.get("/inventory/export")
+def export_inventory(db: Session = Depends(get_db), user: CurrentUser = Reader):
+    """Todo el inventario vigente en un Excel: resumen, equipos, catálogo, instalaciones y una hoja por departamento."""
+    from app.api.software_report import AUTH_LABEL, CATEGORY_LABEL, live_installs
+    from app.services.software import PolicyEvaluator
+
+    now = utcnow()
+    stale_days = get_settings().stale_device_days
+    active = select(Device).where(Device.status != "retired").order_by(Device.hostname)
+    device_rows = device_export_rows(db, active, stale_days)
+    products = db.execute(select(SoftwareProduct).where(SoftwareProduct.merged_into_id.is_(None))
+                          .order_by(SoftwareProduct.name)).scalars().all()
+    relevant_ids = {p.id for p in products if p.is_relevant}
+    installs = live_installs(db, relevant_ids, None)
+    devices = {d.id: d for d in db.execute(active).scalars()}
+    by_id = {p.id: p for p in products}
+    counts: dict[int, set[int]] = {}
+    versions: dict[int, set[str]] = {}
+    for pid, did, ver in db.execute(select(SoftwareInstallation.product_id, SoftwareInstallation.device_id,
+                                           SoftwareVersion.version)
+                                    .join(SoftwareVersion, SoftwareVersion.id == SoftwareInstallation.version_id)
+                                    .join(Device, Device.id == SoftwareInstallation.device_id)
+                                    .where(SoftwareInstallation.present.is_(True), Device.status != "retired")):
+        counts.setdefault(pid, set()).add(did)
+        versions.setdefault(pid, set()).add(ver or "?")
+    bad = fleet_health.unauthorized_devices(db)
+    health_summary = fleet_health.summarize([fleet_health.state(d, bad) for d in devices.values()])
+    by_status: dict[str, int] = {}
+    for p in products:
+        if p.is_relevant:
+            by_status[p.authorization_status] = by_status.get(p.authorization_status, 0) + 1
+    open_alerts = db.execute(select(func.count()).select_from(Alert).where(Alert.status != "resolved")).scalar() or 0
+
+    def table(wb, used, title, headers, rows, widths=None):
+        ws = wb.create_sheet(_sheet_title(title, used))
+        _header(ws, 1, headers)
+        for r, values in enumerate(rows, 2):
+            for c, v in enumerate(values, 1):
+                ws.cell(r, c, _csv_safe(v))
+        for c in range(1, len(headers) + 1):
+            ws.column_dimensions[get_column_letter(c)].width = (widths or {}).get(c, 24)
+        ws.freeze_panes = "A2"
+        if rows:
+            ws.auto_filter.ref = f"A1:{get_column_letter(len(headers))}{len(rows) + 1}"
+
+    def before(wb, used):
+        rows = [("Generado", f"{now:%Y-%m-%d %H:%M} UTC por {user.upn}"), ("Equipos activos", len(devices)),
+                ("Puestos de trabajo", health_summary["workstations"]),
+                ("Puestos limpios", health_summary["clean"]),
+                ("Con software no autorizado", health_summary["unauthorized"]),
+                ("No conformes en Intune", health_summary["noncompliant"]),
+                ("Infraestructura (inventario manual)", health_summary["infra"]),
+                ("Aplicaciones relevantes", len(relevant_ids)),
+                *[(f"Aplicaciones · {AUTH_LABEL.get(k, k)}", v) for k, v in sorted(by_status.items())],
+                ("Componentes, drivers y runtimes", len(products) - len(relevant_ids)),
+                ("Alertas abiertas", open_alerts)]
+        table(wb, used, "Resumen", ["Concepto", "Valor"], rows, {1: 38, 2: 60})
+        table(wb, used, "Catálogo de software",
+              ["Producto", "Editor", "Categoría", "Tipo", "Autorización", "Equipos", "Versiones", "Notas"],
+              [(p.name, p.publisher, CATEGORY_LABEL.get(p.category, p.category),
+                "Aplicación" if p.is_relevant else "Componente", AUTH_LABEL.get(p.authorization_status,
+                                                                                p.authorization_status),
+                len(counts.get(p.id, ())), ", ".join(sorted(versions.get(p.id, ()))), p.notes or "")
+               for p in products], {1: 40, 2: 28, 7: 30, 8: 60})
+
+    def after(wb, used):
+        evaluator = PolicyEvaluator(db)
+        rows = []
+        for i in sorted(installs, key=lambda x: (x.department, x.device_label.casefold(), by_id[x.product_id].name)):
+            d = devices.get(i.device_id)
+            status, _ = evaluator.evaluate(by_id[i.product_id], d)
+            rows.append((i.device_label, i.department, by_id[i.product_id].name, by_id[i.product_id].publisher,
+                         i.version, AUTH_LABEL.get(status, status)))
+        table(wb, used, "Instalaciones", ["Equipo", "Departamento", "Producto", "Editor", "Versión", "Autorización"],
+              rows, {3: 40, 4: 28})
+
+    content = build_workbook(db, installs, device_rows, DEVICE_EXPORT_COLUMNS, f"generado {now:%d/%m/%Y %H:%M} UTC",
+                             before=before, after=after)
+    audit.record(db, user.upn, "export.inventory", "inventory", None,
+                 f"Exportación del inventario completo: {len(devices)} equipos, {len(products)} productos")
+    db.commit()
+    return StreamingResponse(io.BytesIO(content),
+                             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                             headers={"Content-Disposition": f'attachment; filename="inventario_asserta_{now:%Y%m%d}.xlsx"'})
+
+
 # --------------------------------------------------------------------------- cambios
 def _changes_query(change_type, device_id, product_id, since, until, source):
     query = select(InventoryChange)
@@ -666,6 +755,15 @@ def _os_family(name: str | None, version: str | None) -> str:
     return n
 
 
+_ALT = re.compile(r"Alternativa:\s*([^·\n]+)")
+
+
+def _alternative(notes: str | None) -> str | None:
+    """La alternativa corporativa que la política dejó en las notas del producto (si la hay)."""
+    m = _ALT.search(notes or "")
+    return m.group(1).strip() if m else None
+
+
 @router.get("/dashboard")
 def dashboard(db: Session = Depends(get_db), _: CurrentUser = Reader):
     s = get_settings()
@@ -731,8 +829,27 @@ def dashboard(db: Session = Depends(get_db), _: CurrentUser = Reader):
     # El parque es pequeño (decenas de equipos): se devuelve completo para dibujarlo equipo a equipo.
     fleet_rows = db.execute(select(Device, Department.name).outerjoin(Department, Department.id == Device.department_id)
                             .where(active).order_by(Device.hostname).limit(300)).all()
-    fleet = [{"id": dv.id, "name": dv.display_name, "freshness": freshness(dv, s.stale_device_days, now),
-              "compliance": dv.compliance_state, "department": dept} for dv, dept in fleet_rows]
+    bad = fleet_health.unauthorized_devices(db)
+    fleet = []
+    for dv, dept in fleet_rows:
+        st = fleet_health.state(dv, bad)
+        fleet.append({"id": dv.id, "name": dv.display_name, "freshness": freshness(dv, s.stale_device_days, now),
+                      "compliance": dv.compliance_state, "department": dept, "type": fleet_health.type_code(dv),
+                      "model": " ".join(x for x in (dv.manufacturer, dv.model) if x) or None,
+                      "unauthorized": dv.id in bad, "state": st,
+                      "reasons": intune_compliance.reasons(dv.compliance_details, dv.compliance_state)
+                      if st in ("nc", "alertnc") else []})
+    health_summary = fleet_health.summarize([f["state"] for f in fleet])
+    by_type: dict[str, int] = {}
+    for f in fleet:
+        by_type[f["type"] or "unknown"] = by_type.get(f["type"] or "unknown", 0) + 1
+    reasons: dict[str, list[str]] = {}
+    for f in fleet:
+        if f["state"] in ("nc", "alertnc"):
+            for r in f["reasons"] or ["Motivo no detallado por Intune"]:
+                reasons.setdefault(r, []).append(f["name"])
+    compliance_reasons = sorted(({"reason": r, "devices": d} for r, d in reasons.items()),
+                                key=lambda x: -len(x["devices"]))
     by_os: dict[str, int] = {}
     for dv, _ in fleet_rows:
         by_os[_os_family(dv.os_name, dv.os_version)] = by_os.get(_os_family(dv.os_name, dv.os_version), 0) + 1
@@ -757,10 +874,60 @@ def dashboard(db: Session = Depends(get_db), _: CurrentUser = Reader):
     components = scalar(select(func.count()).select_from(SoftwareProduct)
                         .where(SoftwareProduct.merged_into_id.is_(None), SoftwareProduct.is_relevant.is_(False)))
     top_installed = [{"id": p.id, "name": p.name, "publisher": p.publisher, "devices": n} for p, n in ranked(limit=8)]
-    queue = [{"id": p.id, "name": p.name, "publisher": p.publisher, "devices": n}
-             for p, n in ranked(SoftwareProduct.authorization_status.in_(("unclassified", "pending_review")), limit=5)]
+    pending_rows = ranked(SoftwareProduct.authorization_status.in_(("unclassified", "pending_review")), limit=30)
+    queue_depts: dict[int, set[str]] = {}
+    if pending_rows:
+        for pid, dname in db.execute(select(SoftwareInstallation.product_id, Department.name)
+                                     .join(Device, Device.id == SoftwareInstallation.device_id)
+                                     .outerjoin(Department, Department.id == Device.department_id)
+                                     .where(SoftwareInstallation.present.is_(True), active,
+                                            SoftwareInstallation.product_id.in_([p.id for p, _ in pending_rows]))
+                                     .distinct()):
+            queue_depts.setdefault(pid, set()).add(dname or "Sin departamento")
+    queue = [{"id": p.id, "name": p.name, "publisher": p.publisher, "devices": n, "first_seen_at": p.first_seen_at,
+              "status": p.authorization_status, "notes": p.notes,
+              "departments": sorted(queue_depts.get(p.id, set()), key=lambda d: (d == "Sin departamento", d))}
+             for p, n in pending_rows]
+
+    # Aplicaciones con muchas versiones distintas instaladas a la vez (conviene unificar).
+    ver_count = func.count(func.distinct(SoftwareInstallation.version_id))
+    spread_rows = db.execute(select(SoftwareProduct.id, SoftwareProduct.name, ver_count)
+                             .join(SoftwareInstallation, SoftwareInstallation.product_id == SoftwareProduct.id)
+                             .where(*relevant, SoftwareInstallation.present.is_(True))
+                             .group_by(SoftwareProduct.id, SoftwareProduct.name)
+                             .having(ver_count >= 5).order_by(ver_count.desc(), SoftwareProduct.name)).all()
+    # Novedades: aplicaciones que aparecen por primera vez y las que dejan de verse (30 días).
+    new_rows = db.execute(select(func.date(SoftwareProduct.first_seen_at), func.count())
+                          .where(*relevant, SoftwareProduct.first_seen_at >= since_30)
+                          .group_by(func.date(SoftwareProduct.first_seen_at))).all()
+    new_by_day = {str(d)[:10]: n for d, n in new_rows}
+    present_ids = select(SoftwareInstallation.product_id).where(SoftwareInstallation.present.is_(True))
+    gone = scalar(select(func.count(func.distinct(SoftwareInstallation.product_id)))
+                  .join(SoftwareProduct, SoftwareProduct.id == SoftwareInstallation.product_id)
+                  .where(*relevant, SoftwareInstallation.removed_at >= since_30,
+                         SoftwareInstallation.product_id.not_in(present_ids)))
     resolved_30 = scalar(select(func.count()).select_from(Alert).where(Alert.status == "resolved",
                                                                         Alert.resolved_at >= since_30))
+    open_unauth = (Alert.alert_type == "unauthorized_software", Alert.status != "resolved")
+    dev_alerts = func.count(func.distinct(Alert.device_id))
+    cause_rows = db.execute(select(Alert.product_id, dev_alerts, func.count())
+                            .where(*open_unauth, Alert.product_id.is_not(None))
+                            .group_by(Alert.product_id).order_by(dev_alerts.desc(), Alert.product_id)).all()
+    cause_products = {p.id: p for p in db.execute(select(SoftwareProduct).where(
+        SoftwareProduct.id.in_([pid for pid, _, _ in cause_rows[:5]]))).scalars()} if cause_rows else {}
+    causes = [{"product_id": pid, "name": cause_products[pid].name, "devices": devs, "alerts": n,
+               "alternative": _alternative(cause_products[pid].notes)} for pid, devs, n in cause_rows[:5]]
+    rest = cause_rows[5:]
+    weekly_alerts = [{"week_start": (now - timedelta(days=7 * (8 - i))).strftime("%Y-%m-%d"), "opened": 0, "resolved": 0}
+                     for i in range(8)]
+    for created, resolved in db.execute(select(Alert.created_at, Alert.resolved_at).where(
+            (Alert.created_at >= since_56) | (Alert.resolved_at >= since_56))):
+        for when, key in ((created, "opened"), (resolved, "resolved")):
+            if when is None:
+                continue
+            age = (today - when.date()).days
+            if 0 <= age < 56:
+                weekly_alerts[7 - age // 7][key] += 1
     dept_rows = db.execute(select(Department.name, func.count(Device.id)).join(
         Device, (Device.department_id == Department.id) & active).group_by(Department.name)
         .order_by(func.count(Device.id).desc())).all()
@@ -769,12 +936,22 @@ def dashboard(db: Session = Depends(get_db), _: CurrentUser = Reader):
         "generated_at": now,
         "devices": {"total": total, "current": current, "stale": total - current - never, "never_synced": never,
                     "unassigned": unassigned, "by_status": by_status, "compliance": {str(k): v for k, v in compliance.items()},
-                    "by_os": by_os, "by_source": by_source, "fleet": fleet},
+                    "by_os": by_os, "by_source": by_source, "by_type": by_type, "fleet": fleet},
+        "health": health_summary,
+        "compliance_reasons": compliance_reasons,
         "software": {"products": sum(products.values()), "by_status": products, "installations": installs,
                      "pending": products.get("unclassified", 0) + products.get("pending_review", 0),
                      "unauthorized_products": products.get("unauthorized", 0),
-                     "components": components, "top": top_installed, "queue": queue},
+                     "components": components, "top": top_installed, "queue": queue,
+                     "versions_spread": {"count": len(spread_rows),
+                                         "top": [{"id": i, "name": n, "versions": v} for i, n, v in spread_rows[:3]]},
+                     "new_30d": sum(new_by_day.values()), "gone_30d": gone,
+                     "new_daily": [new_by_day.get((now - timedelta(days=i)).strftime("%Y-%m-%d"), 0)
+                                   for i in range(29, -1, -1)]},
         "alerts": {"open": sum(alerts.values()), "by_severity": alerts, "resolved_30d": resolved_30,
+                   "causes": causes, "causes_total": len(cause_rows),
+                   "rest": {"products": len(rest), "alerts": sum(n for _, _, n in rest)},
+                   "unauthorized_devices": len(bad), "weekly": weekly_alerts,
                    "top": [_alert(a) for a in top_alerts]},
         "monthly": {"period": period, "snapshot": _snap(snap) if snap else None,
                     "coverage": snapshots.coverage(db, period)},

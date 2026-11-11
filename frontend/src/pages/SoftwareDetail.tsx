@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, GitMerge, Pencil, Plus, ShieldCheck } from "lucide-react";
 import { useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { AuthBadge, SourceBadge } from "@/components/badges";
 import { DataTable, type Column } from "@/components/DataTable";
 import { Badge, Button, Card, DefinitionList, ErrorState, Field, Modal, Notice, PageHeader, Spinner, Tabs } from "@/components/ui";
@@ -26,7 +26,9 @@ type Tab = "instalaciones" | "versiones" | "politicas" | "alias";
 export default function SoftwareDetail() {
   const id = Number(useParams().id);
   const can = useCan();
-  const [tab, setTab] = useState<Tab>("instalaciones");
+  const initialTab = useSearchParams()[0].get("tab") as Tab | null;
+  const [tab, setTab] = useState<Tab>(initialTab && ["instalaciones", "versiones", "politicas", "alias"].includes(initialTab)
+    ? initialTab : "instalaciones");
   const [version, setVersion] = useState<string | null>(null);
   const [dialog, setDialog] = useState<null | "edit" | "policy" | "alias" | "merge">(null);
   const q = useQuery({ queryKey: ["product", id], queryFn: () => api.get<ProductDetail>(`/software/${id}`) });

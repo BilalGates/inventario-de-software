@@ -286,16 +286,17 @@ export function ConfirmDialog({ open, title, children, confirmLabel = "Confirmar
 }
 
 // ---------------------------------------------------------------- Avisos (toasts)
-interface Toast { id: number; tone: "ok" | "danger" | "info"; text: string }
-const ToastCtx = createContext<(tone: Toast["tone"], text: string) => void>(() => {});
+export interface ToastAction { label: string; run: () => void }
+interface Toast { id: number; tone: "ok" | "danger" | "info"; text: string; action?: ToastAction }
+const ToastCtx = createContext<(tone: Toast["tone"], text: string, action?: ToastAction) => void>(() => {});
 export const useToast = () => useContext(ToastCtx);
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const push = useCallback((tone: Toast["tone"], text: string) => {
+  const push = useCallback((tone: Toast["tone"], text: string, action?: ToastAction) => {
     const id = Date.now() + Math.random();
-    setToasts((t) => [...t.slice(-3), { id, tone, text }]);
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), tone === "danger" ? 8000 : 4000);
+    setToasts((t) => [...t.slice(-3), { id, tone, text, action }]);
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), tone === "danger" || action ? 8000 : 4000);
   }, []);
   return (
     <ToastCtx.Provider value={push}>
@@ -307,7 +308,13 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             {t.tone === "ok" ? <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-ok" aria-hidden />
               : t.tone === "danger" ? <AlertTriangle className="mt-0.5 size-4 shrink-0 text-signal" aria-hidden />
               : <Loader2 className="mt-0.5 size-4 shrink-0 animate-spin text-muted" aria-hidden />}
-            <p className="text-sm">{t.text}</p>
+            <p className="min-w-0 flex-1 text-sm">{t.text}</p>
+            {t.action && (
+              <button type="button" className="shrink-0 rounded-md border border-border-strong px-2.5 py-1 text-xs font-medium hover:border-fg"
+                onClick={() => { t.action!.run(); setToasts((all) => all.filter((x) => x.id !== t.id)); }}>
+                {t.action.label}
+              </button>
+            )}
           </div>
         ))}
       </div>

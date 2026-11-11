@@ -1,12 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { CheckCircle2, Download, FileSpreadsheet, GitCompare, Plus, ShieldCheck, ShieldAlert } from "lucide-react";
 import { useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
-import { SeverityBadge, SnapshotBadge } from "@/components/badges";
-import { DataTable, type Column } from "@/components/DataTable";
-import { Badge, Button, Card, EmptyState, Field, Modal, Notice, PageHeader, Spinner, Stat, StatStrip, Tabs } from "@/components/ui";
-import { MonthlyClose, WeeklyChanges } from "@/components/viz";
-import { useDashboard } from "@/lib/dashboard";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { SnapshotBadge } from "@/components/badges";
+import { DataTable, type Column, type TableGroup } from "@/components/DataTable";
+import type { MenuEntry } from "@/components/ContextMenu";
+import { BigNum, FilterChips, HATCH, Kpi, KpiStrip, ScreenHeader, StackBar, StatusDot, Stepper, Swatch, groupByDay, hhmm, type DotKind } from "@/components/kit";
+import { Badge, Button, Card, EmptyState, Field, Modal, Notice, Segmented, Spinner, Tabs } from "@/components/ui";
+import { useDashboard, type DashboardData } from "@/lib/dashboard";
 import { api } from "@/lib/api";
 import { useCan } from "@/lib/auth";
 import { CHANGE_LABEL, FIELD_LABEL, SOURCE_LABEL, currentPeriod, fmtDateTime, fmtPeriod, fmtRelative } from "@/lib/format";
@@ -15,35 +16,79 @@ import type { Alert, Change, Paged, Snapshot } from "@/lib/types";
 
 type Tab = "mensual" | "cambios" | "alertas" | "revision" | "registro";
 
+const weekFmt = new Intl.DateTimeFormat("es-ES", { day: "2-digit", month: "short" });
+const PHASES = ["Recogida", "Revisión", "Cierre", "Informe"];
+
+function AuditSummary({ dash }: { dash: DashboardData }) {
+  const sev = dash.alerts.by_severity;
+  const weeks = dash.alerts.weekly ?? [];
+  const maxW = Math.max(1, ...weeks.map((w) => Math.max(w.opened, w.resolved)));
+  const days = dash.changes_daily ?? [];
+  const t = days.reduce((a, d) => ({ i: a.i + d.installed, u: a.u + d.updated, r: a.r + d.removed }), { i: 0, u: 0, r: 0 });
+  const m = dash.monthly;
+  const status = m.snapshot?.status;
+  const phase = status === "approved" ? 3 : status === "draft" ? 1 : m.coverage.complete ? 1 : 0;
+  const [y, mo] = m.period.split("-").map(Number);
+  const daysLeft = Math.max(0, Math.ceil((new Date(y, mo, 1).getTime() - Date.now()) / 864e5));
+  return (
+    <KpiStrip label="Resumen de auditoría" className="mb-6">
+      <Kpi label="Alertas por severidad"
+        footer={dash.alerts.unauthorized_devices ? `${dash.alerts.unauthorized_devices} equipos con software no autorizado` : undefined}>
+        <BigNum value={dash.alerts.open}>{`${sev.critical ?? 0} críticas · ${sev.warning ?? 0} avisos · ${sev.info ?? 0} info`}</BigNum>
+        <StackBar label={`${sev.critical ?? 0} críticas, ${sev.warning ?? 0} avisos, ${sev.info ?? 0} informativas`} segments={[
+          { label: "Críticas", value: sev.critical ?? 0, className: "bg-signal-fill" },
+          { label: "Avisos", value: sev.warning ?? 0, className: "bg-signal-fill/40" },
+          { label: "Informativas", value: sev.info ?? 0, className: HATCH },
+        ]} />
+      </Kpi>
+      <Kpi label="Abiertas y resueltas · 8 semanas" footer={`${dash.alerts.resolved_30d ?? 0} resueltas en 30 días`}>
+        <div role="img" aria-label={weeks.map((w) => `Semana del ${w.week_start}: ${w.opened} abiertas, ${w.resolved} resueltas`).join("; ")}
+          className="flex h-[72px] items-end gap-2">
+          {weeks.map((w) => (
+            <span key={w.week_start} className="flex h-full flex-1 items-end gap-px"
+              title={`Semana del ${weekFmt.format(new Date(`${w.week_start}T12:00:00`))}: ${w.opened} abiertas · ${w.resolved} resueltas`}>
+              <span className="flex-1 rounded-t-[2px] bg-signal-fill" style={{ height: `${Math.max(3, (w.opened / maxW) * 100)}%` }} />
+              <span className="flex-1 rounded-t-[2px] bg-chart-1" style={{ height: `${Math.max(3, (w.resolved / maxW) * 100)}%` }} />
+            </span>
+          ))}
+        </div>
+        <p className="flex gap-4 text-xs text-muted">
+          <span className="inline-flex items-center gap-1.5"><Swatch className="bg-signal-fill" />abiertas</span>
+          <span className="inline-flex items-center gap-1.5"><Swatch className="bg-chart-1" />resueltas</span>
+        </p>
+      </Kpi>
+      <Kpi label="Cambios · 30 días">
+        <BigNum value={t.i + t.u + t.r}>cambios detectados</BigNum>
+        <StackBar label={`${t.u} actualizaciones, ${t.i} instalaciones, ${t.r} desinstalaciones`} segments={[
+          { label: "Actualizaciones", value: t.u, className: "bg-chart-2" },
+          { label: "Instalaciones", value: t.i, className: "bg-chart-1" },
+          { label: "Desinstalaciones", value: t.r, className: "bg-signal-fill" },
+        ]} />
+        <p className="text-xs text-muted">{t.u} actualizaciones · {t.i} instalaciones · {t.r} bajas</p>
+      </Kpi>
+      <Kpi label={`Cierre de ${fmtPeriod(m.period).toLowerCase()}`}
+        footer={status === "approved" ? "Cierre completado" : daysLeft === 1 ? "Falta 1 día" : `Faltan ${daysLeft} días`}>
+        <BigNum value={PHASES[phase]} />
+        <Stepper steps={PHASES} current={phase} />
+      </Kpi>
+    </KpiStrip>
+  );
+}
+
 export default function Audit() {
   const [params, setParams] = useSearchParams();
   const tab = (params.get("tab") ?? "mensual") as Tab;
   const dash = useDashboard().data;
-  const sev = dash?.alerts.by_severity ?? {};
   const snap = dash?.monthly.snapshot;
-  const goAlerts = (severity?: string) => setParams(severity ? { tab: "alertas", severity } : { tab: "alertas" });
+  const causes = dash?.alerts.causes_total ?? 0;
   return (
     <>
-      <PageHeader eyebrow="Control · Auditoría" title="Auditoría"
-        description="Alertas abiertas, cambios registrados y cierre del inventario mensual, con evidencias trazables."
+      <ScreenHeader eyebrow="Control · Auditoría"
+        title={dash ? `${dash.alerts.open} ${dash.alerts.open === 1 ? "alerta abierta" : "alertas abiertas"}` : "Auditoría"}
+        sub={causes ? `por ${causes} ${causes === 1 ? "causa" : "causas"}` : undefined}
         actions={snap && <Button variant="primary" icon={<FileSpreadsheet className="size-4" />}
           onClick={() => api.download(`/snapshots/${snap.id}/report`)}>Informe mensual (Excel)</Button>} />
-      {dash && (
-        <div className="mb-8 flex flex-col gap-6">
-          <StatStrip label="Alertas por severidad">
-            <Stat label="Críticas" value={sev.critical ?? 0} tone={sev.critical ? "danger" : undefined}
-              hint={sev.critical ? "requieren actuación" : "ninguna abierta"} onClick={() => goAlerts("critical")} />
-            <Stat label="Avisos" value={sev.warning ?? 0} hint="atender esta semana" onClick={() => goAlerts("warning")} />
-            <Stat label="Informativas" value={sev.info ?? 0} hint="novedades sin urgencia" onClick={() => goAlerts("info")} />
-            <Stat label="Resueltas · 30 d" value={dash.alerts.resolved_30d ?? 0} hint="cerradas con justificación"
-              onClick={() => setParams({ tab: "alertas", status: "resolved" })} />
-          </StatStrip>
-          <div className="flex flex-wrap gap-6">
-            <MonthlyClose m={dash.monthly} reviewCases={dash.open_review_cases} className="flex-[1_1_22rem]" />
-            <WeeklyChanges weeks={dash.changes_weekly ?? []} className="flex-[2_1_30rem]" />
-          </div>
-        </div>
-      )}
+      {dash && <AuditSummary dash={dash} />}
       <Tabs value={tab} onChange={(t) => setParams({ tab: t })} tabs={[
         { id: "mensual", label: "Inventarios mensuales" }, { id: "cambios", label: "Cambios" },
         { id: "alertas", label: "Alertas", count: dash?.alerts.open },
@@ -72,7 +117,12 @@ function Monthly() {
   if (q.isLoading) return <Spinner />;
   const snaps = q.data ?? [];
   const cols: Column<Snapshot>[] = [
-    { id: "p", header: "Periodo", cell: (s) => <span className="font-medium">{fmtPeriod(s.period)}{s.version > 1 && <span className="text-muted"> · v{s.version}</span>}</span> },
+    { id: "p", header: "Periodo", cell: (s) => (
+      <span className="flex items-center gap-3 font-semibold">
+        <StatusDot kind={s.status === "approved" ? "success" : s.status === "rejected" ? "failed" : s.status === "legacy" ? "muted" : "pending"} />
+        {fmtPeriod(s.period)}{s.version > 1 && <span className="font-normal text-muted"> · v{s.version}</span>}
+      </span>
+    ) },
     { id: "st", header: "Estado", cell: (s) => <SnapshotBadge status={s.status} /> },
     { id: "c", header: "Recogida", cell: (s) => s.status === "legacy" ? <span className="text-muted">Importado</span>
       : s.is_complete ? <Badge tone="ok">Completa</Badge> : <Badge tone="warn">Incompleta</Badge> },
@@ -101,6 +151,14 @@ function Monthly() {
         </Notice>
       </div>
       <DataTable columns={cols} rows={snaps} rowKey={(s) => s.id} error={q.error}
+        rowMenu={(s) => {
+          const prev = snaps.find((x) => x.period < s.period && x.status !== "rejected");
+          return { title: fmtPeriod(s.period), entries: [
+            ...(can.write && s.status === "draft" ? [{ label: "Revisar y aprobar…", onSelect: () => setReviewing(s) }] : []),
+            { label: "Comparar con el mes anterior", disabled: !prev, onSelect: () => { if (prev) setCompare([prev.id, s.id]); } },
+            { label: "Descargar informe (Excel)", onSelect: () => api.download(`/snapshots/${s.id}/report`) },
+          ] };
+        }}
         toolbar={can.write && <div className="flex items-center gap-2">
           <input type="month" aria-label="Periodo" className="field w-40" value={period} onChange={(e) => setPeriod(e.target.value)} />
           <Button icon={<Plus className="size-4" />} loading={generate.isPending} onClick={() => generate.mutate(undefined)}>Generar inventario</Button>
@@ -183,6 +241,12 @@ function CompareDialog({ ids, onClose }: { ids: [number, number]; onClose: () =>
 }
 
 // ------------------------------------------------------------------ cambios
+const CHANGE_DOT: Record<string, DotKind> = {
+  software_installed: "ok", software_removed: "alert", software_version_changed: "muted", authorization_changed: "warning",
+  device_added: "info", device_retired: "failed", device_reactivated: "ok", device_updated: "info", device_not_observed: "warning",
+  department_changed: "info", user_changed: "info",
+};
+
 const CHANGE_GROUPS: Record<string, string> = {
   "": "Todos los cambios",
   "software_installed,software_removed,software_version_changed": "Software",
@@ -195,9 +259,10 @@ function Changes() {
   const { values, set, page } = useUrlState(["type", "since"] as const);
   const params = { type: values.type, since: values.since, page, page_size: 50 };
   const q = useQuery({ queryKey: ["changes", params], queryFn: () => api.get<Paged<Change>>("/changes", params), placeholderData: (p) => p });
+  const nav = useNavigate();
   const cols: Column<Change>[] = [
-    { id: "at", header: "Fecha", cell: (c) => <span className="whitespace-nowrap text-muted">{fmtDateTime(c.at)}</span> },
-    { id: "type", header: "Cambio", cell: (c) => CHANGE_LABEL[c.type] ?? c.type },
+    { id: "at", header: "Hora", cell: (c) => <span className="code whitespace-nowrap text-muted" title={fmtDateTime(c.at)}>{hhmm(c.at)}</span> },
+    { id: "type", header: "Cambio", cell: (c) => <span className="flex items-center gap-2.5"><StatusDot kind={CHANGE_DOT[c.type] ?? "muted"} />{CHANGE_LABEL[c.type] ?? c.type}</span> },
     { id: "device", header: "Dispositivo", cell: (c) => c.device ? <Link className="hover:underline" to={`/dispositivos/${c.device_id}`}>{c.device}</Link> : "—" },
     { id: "product", header: "Software / campo", cell: (c) => c.product ? <Link className="hover:underline" to={`/software/${c.product_id}`}>{c.product}</Link> : c.field ? FIELD_LABEL[c.field] ?? c.field : "—" },
     { id: "diff", header: "Detalle", cell: (c) => (c.old || c.new) ? <span className="font-mono text-xs">{c.old ?? "—"} → {c.new ?? "—"}</span> : "—" },
@@ -205,6 +270,12 @@ function Changes() {
   ];
   return (
     <DataTable columns={cols} rows={q.data?.items} total={q.data?.total} rowKey={(c) => c.id} loading={q.isLoading} error={q.error}
+      groups={groupByDay(q.data?.items ?? [], (c) => c.at)}
+      rowMenu={(c) => ({ entries: [
+        { label: "Abrir equipo", disabled: !c.device_id, onSelect: () => nav(`/dispositivos/${c.device_id}`) },
+        { label: "Ver historial del equipo", disabled: !c.device_id, onSelect: () => nav(`/dispositivos/${c.device_id}?tab=historial`) },
+        { label: "Abrir aplicación", disabled: !c.product_id, onSelect: () => nav(`/software/${c.product_id}`) },
+      ] })}
       page={page} pageSize={50} onPage={(p) => set({ page: p }, false)} storageKey="changes"
       toolbar={<>
         <select aria-label="Tipo de cambio" className="field w-auto" value={values.type ?? ""} onChange={(e) => set({ type: e.target.value || null })}>
@@ -218,52 +289,125 @@ function Changes() {
 }
 
 // ------------------------------------------------------------------ alertas
+const TITLE = /^Software no autorizado: (.+) en (.+)$/;
+const TYPE_LABEL: Record<string, string> = {
+  unauthorized_software: "Software no autorizado", new_software: "Software nuevo sin clasificar", stale_source: "Fuente sin datos recientes",
+};
+type AlertChip = "open" | "critical" | "warning" | "info" | "resolved";
+const CHIP_PARAMS: Record<AlertChip, { status: string; severity?: string }> = {
+  open: { status: "open,acknowledged" }, critical: { status: "open,acknowledged", severity: "critical" },
+  warning: { status: "open,acknowledged", severity: "warning" }, info: { status: "open,acknowledged", severity: "info" },
+  resolved: { status: "resolved" },
+};
+const sevDot = (a: Alert): DotKind => (a.status === "resolved" ? "success" : a.severity === "critical" ? "critical"
+  : a.severity === "warning" ? "warning" : "info");
+
 function Alerts() {
   const can = useCan();
-  const { values, set, page } = useUrlState(["status", "severity"] as const);
-  const status = values.status ?? "open,acknowledged";
-  const params = { status, severity: values.severity, page, page_size: 50 };
+  const nav = useNavigate();
+  const dash = useDashboard().data;
+  const { values, set } = useUrlState(["chip", "by", "status", "severity"] as const);
+  // Compatibilidad con enlaces antiguos (?status=resolved, ?severity=critical).
+  const chip = (values.chip ?? (values.status === "resolved" ? "resolved" : values.severity ?? "open")) as AlertChip;
+  const byDevice = values.by === "device";
+  const params = { ...CHIP_PARAMS[chip], page_size: 500 };
   const q = useQuery({ queryKey: ["alerts", params], queryFn: () => api.get<Paged<Alert>>("/alerts", params), placeholderData: (p) => p });
-  const [resolving, setResolving] = useState<Alert | null>(null);
+  const [resolving, setResolving] = useState<Alert[] | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<number | string>>(new Set());
   const [note, setNote] = useState("");
-  const act = useAction(({ id, action, note }: { id: number; action: string; note?: string }) => api.send("POST", `/alerts/${id}`, { action, note }), {
-    success: "Alerta actualizada", invalidate: [["alerts"], ["alerts-count"], ["dashboard"]], onSuccess: () => { setResolving(null); setNote(""); },
+  const act = useAction(async ({ ids, action, note }: { ids: number[]; action: string; note?: string }) => {
+    for (const id of ids) await api.send("POST", `/alerts/${id}`, { action, note });
+    return ids.length;
+  }, {
+    success: (n) => (n === 1 ? "Alerta actualizada" : `${n} alertas actualizadas`), invalidate: [["alerts"], ["alerts-count"], ["dashboard"]],
+    onSuccess: () => { setResolving(null); setNote(""); setSelectedIds(new Set()); },
+  });
+  const items = q.data?.items ?? [];
+  const parse = (a: Alert) => {
+    const m = TITLE.exec(a.title);
+    return { product: m?.[1] ?? null, device: m?.[2] ?? null };
+  };
+  const groupKey = (a: Alert) => (byDevice
+    ? (a.device_id ? `d${a.device_id}` : "none")
+    : a.type === "unauthorized_software" && a.product_id ? `p${a.product_id}` : `t${a.type}`);
+  const map = new Map<string, Alert[]>();
+  items.forEach((a) => map.set(groupKey(a), [...(map.get(groupKey(a)) ?? []), a]));
+  const groups: TableGroup<Alert>[] = [...map.entries()].sort((a, b) => b[1].length - a[1].length).map(([key, list]) => {
+    const first = list[0];
+    const p = parse(first);
+    const cause = dash?.alerts.causes?.find((c) => `p${c.product_id}` === key);
+    const label = byDevice ? (p.device ?? (first.device_id ? `Equipo #${first.device_id}` : "Sin equipo"))
+      : p.product ?? (TYPE_LABEL[first.type] ?? first.type);
+    return { key, label, rows: list, lead: <StatusDot kind={sevDot(first)} />,
+      summary: cause?.alternative ? `Alternativa: ${cause.alternative}` : `${list.length} ${list.length === 1 ? "alerta" : "alertas"}` };
   });
   const cols: Column<Alert>[] = [
-    { id: "sev", header: "Severidad", cell: (a) => <SeverityBadge severity={a.severity} /> },
-    { id: "title", header: "Incidencia", cell: (a) => <div className="min-w-0 max-w-[36rem] whitespace-normal"><p className="font-medium">{a.title}</p>
-      {a.detail && <p className="line-clamp-2 text-xs text-muted">{a.detail}</p>}</div> },
-    { id: "link", header: "Relacionado", cell: (a) => <div className="flex flex-col text-xs">
-      {a.device_id && <Link className="link" to={`/dispositivos/${a.device_id}`}>Dispositivo</Link>}
-      {a.product_id && <Link className="link" to={`/software/${a.product_id}`}>Producto</Link>}
-      {a.run_id && <Link className="link" to={`/sincronizacion?run=${a.run_id}`}>Ejecución #{a.run_id}</Link>}</div> },
+    { id: "title", header: byDevice ? "Incidencia" : "Equipo", cell: (a) => {
+      const p = parse(a);
+      return (
+        <div className="flex min-w-0 items-center gap-3">
+          <StatusDot kind={sevDot(a)} />
+          <div className="min-w-0 max-w-[36rem] whitespace-normal">
+            {!byDevice && a.device_id
+              ? <Link to={`/dispositivos/${a.device_id}`} className="font-semibold hover:underline hover:underline-offset-4">{p.device ?? `Equipo #${a.device_id}`}</Link>
+              : <p className="font-semibold">{byDevice && p.product ? p.product : TYPE_LABEL[a.type] ?? a.type}</p>}
+            <p className="text-xs text-muted">{a.title}</p>
+            {a.detail && <p className="line-clamp-1 text-xs text-muted">{a.detail}</p>}
+          </div>
+        </div>
+      );
+    } },
     { id: "when", header: "Detectada", cell: (a) => <span className="whitespace-nowrap text-muted" title={`Vista por última vez ${fmtDateTime(a.last_seen_at)}`}>{fmtRelative(a.created_at)}</span> },
     { id: "status", header: "Estado", cell: (a) => a.status === "resolved"
       ? <span className="text-xs text-muted" title={a.resolution ?? ""}>Resuelta por {a.resolved_by}</span>
-      : a.status === "acknowledged" ? <Badge tone="info">En curso</Badge> : <Badge tone="warn">Abierta</Badge> },
-    { id: "act", header: "", cell: (a) => can.write && a.status !== "resolved" && <div className="flex justify-end gap-1">
-      {a.status === "open" && <Button size="sm" variant="ghost" onClick={() => act.mutate({ id: a.id, action: "acknowledge" })}>Asumir</Button>}
-      <Button size="sm" onClick={() => setResolving(a)}>Resolver</Button></div> },
+      : a.status === "acknowledged" ? <span className="text-fg-2">En curso</span> : <span className="font-medium text-signal">Abierta</span> },
   ];
+  const pending = (list: Alert[]) => list.filter((x) => x.status !== "resolved");
+  const menu = (a: Alert, sel: Alert[]): MenuEntry[] => {
+    const group = groups.find((g) => g.rows.includes(a));
+    const out: MenuEntry[] = [];
+    if (can.write && a.status !== "resolved") {
+      out.push({ label: sel.length > 1 ? `Resolver ${pending(sel).length} alertas…` : "Resolver…", hint: "R", onSelect: () => setResolving(pending(sel)) });
+      if (sel.length === 1 && a.status === "open") out.push({ label: "Marcar en curso", onSelect: () => act.mutate({ ids: [a.id], action: "acknowledge" }) });
+      if (a.product_id && a.device_id) out.push({ label: "Excepción para este equipo…", onSelect: () => nav(`/software/${a.product_id}?tab=politicas`) });
+      out.push("separator");
+    }
+    out.push(
+      { label: "Abrir equipo", disabled: !a.device_id, onSelect: () => nav(`/dispositivos/${a.device_id}`) },
+      { label: "Abrir aplicación", disabled: !a.product_id, onSelect: () => nav(`/software/${a.product_id}`) },
+      { label: "Ver historial del equipo", disabled: !a.device_id, onSelect: () => nav(`/dispositivos/${a.device_id}?tab=historial`) },
+    );
+    if (a.run_id) out.push({ label: `Ver ejecución #${a.run_id}`, onSelect: () => nav(`/sincronizacion?run=${a.run_id}`) });
+    if (can.write && group && pending(group.rows).length > 1 && sel.length === 1) {
+      out.push("separator", { label: `Resolver las ${pending(group.rows).length} de este grupo…`, onSelect: () => setResolving(pending(group.rows)) });
+    }
+    return out;
+  };
+  const counts = dash?.alerts.by_severity ?? {};
   return (
     <>
-      <DataTable columns={cols} rows={q.data?.items} total={q.data?.total} rowKey={(a) => a.id} loading={q.isLoading} error={q.error}
-        page={page} pageSize={50} onPage={(p) => set({ page: p }, false)}
+      <DataTable columns={cols} rows={items} groups={groups} rowKey={(a) => a.id} loading={q.isLoading} error={q.error}
+        rowMenu={(a, sel) => ({ title: parse(a).device ?? a.title, entries: menu(a, sel) })}
+        selectable={can.write} selected={selectedIds} onSelectedChange={setSelectedIds}
+        bulkActions={<Button size="sm" onClick={() => setResolving(pending(items.filter((a) => selectedIds.has(a.id))))}>Resolver</Button>}
         empty={<EmptyState title="Sin alertas" icon={<CheckCircle2 className="size-5 text-ok" />} />}
-        toolbar={<>
-          <select aria-label="Estado" className="field w-auto" value={status} onChange={(e) => set({ status: e.target.value })}>
-            <option value="open,acknowledged">Pendientes</option><option value="resolved">Resueltas</option><option value="open,acknowledged,resolved">Todas</option>
-          </select>
-          <select aria-label="Severidad" className="field w-auto" value={values.severity ?? ""} onChange={(e) => set({ severity: e.target.value || null })}>
-            <option value="">Cualquier severidad</option><option value="critical">Crítica</option><option value="warning">Aviso</option><option value="info">Info</option>
-          </select>
-        </>} />
+        footer="Las alertas de software se agrupan por la aplicación que las causa: al retirarla del equipo, la alerta se cierra en la próxima sincronización."
+        header={<div className="py-3"><FilterChips label="Estado" value={chip} onChange={(v) => set({ chip: v === "open" ? null : v, status: null, severity: null })} options={[
+          { id: "open", label: "Abiertas", count: dash?.alerts.open },
+          { id: "critical", label: "Críticas", count: counts.critical ?? 0, dot: "critical" },
+          { id: "warning", label: "Avisos", count: counts.warning ?? 0, dot: "warning" },
+          { id: "info", label: "Informativas", count: counts.info ?? 0, dot: "info" },
+          { id: "resolved", label: "Resueltas", dot: "success" },
+        ]} /></div>}
+        toolbar={<Segmented label="Agrupar" value={byDevice ? "device" : "cause"} onChange={(v) => set({ by: v === "cause" ? null : "device" })}
+          options={[{ id: "cause", label: "Por causa" }, { id: "device", label: "Por equipo" }]} />} />
       {resolving && (
-        <Modal open onClose={() => setResolving(null)} title="Resolver alerta" footer={<>
+        <Modal open onClose={() => setResolving(null)} title={resolving.length === 1 ? "Resolver alerta" : `Resolver ${resolving.length} alertas`} footer={<>
           <Button onClick={() => setResolving(null)}>Cancelar</Button>
-          <Button variant="primary" disabled={!note.trim()} loading={act.isPending} onClick={() => act.mutate({ id: resolving.id, action: "resolve", note })}>Resolver</Button>
+          <Button variant="primary" disabled={!note.trim() || resolving.length === 0} loading={act.isPending}
+            onClick={() => act.mutate({ ids: resolving.map((a) => a.id), action: "resolve", note })}>Resolver</Button>
         </>}>
-          <p className="mb-3 font-medium">{resolving.title}</p>
+          {resolving.length === 1 && <p className="mb-3 font-medium">{resolving[0].title}</p>}
           <Field label="¿Cómo se ha resuelto?" hint="Si la condición persiste, la próxima sincronización volverá a abrir la alerta.">
             {(id) => <textarea id={id} rows={3} className="field" value={note} onChange={(e) => setNote(e.target.value)} />}
           </Field>
@@ -278,6 +422,7 @@ interface Case { id: number; type: string; summary: string; data: Record<string,
 
 function ReviewCases() {
   const can = useCan();
+  const nav = useNavigate();
   const q = useQuery({ queryKey: ["review-cases"], queryFn: () => api.get<Case[]>("/review-cases") });
   const [open, setOpen] = useState<Case | null>(null);
   const [form, setForm] = useState({ action: "dismiss", note: "", keep: "", merge: "" });
@@ -290,6 +435,10 @@ function ReviewCases() {
     <>
       <div className="mb-3"><Notice>Cuando la conciliación no tiene información suficiente para decidir si dos registros son el mismo equipo, no fusiona nada y abre un caso aquí.</Notice></div>
       <DataTable rows={q.data} rowKey={(c) => c.id} loading={q.isLoading} error={q.error}
+        rowMenu={(c) => ({ title: c.summary, entries: [
+          ...(can.write ? [{ label: "Resolver…", onSelect: () => { setOpen(c); setForm({ action: "dismiss", note: "", keep: String(ids(c)[0] ?? ""), merge: String(ids(c)[1] ?? "") }); } }, "separator" as const] : []),
+          ...ids(c).map((i) => ({ label: `Abrir equipo #${i}`, onSelect: () => nav(`/dispositivos/${i}`) })),
+        ] })}
         empty={<EmptyState title="No hay casos pendientes" icon={<CheckCircle2 className="size-5 text-ok" />} />}
         columns={[
           { id: "s", header: "Caso", cell: (c) => <span className="font-medium">{c.summary}</span> },
@@ -338,6 +487,11 @@ function AuditLog() {
         <Button className="ml-auto" icon={<Download className="size-4" />} onClick={() => api.download("/audit/export", { format: "xlsx" })}>Exportar evidencias</Button>
       </div>
       <DataTable rows={q.data?.items} total={q.data?.total} rowKey={(e) => e.id} loading={q.isLoading} error={q.error}
+        groups={groupByDay(q.data?.items ?? [], (e) => e.at)}
+        rowMenu={(e) => ({ entries: [
+          { label: `Ver solo las acciones de ${e.actor}`, onSelect: () => set({ actor: e.actor }) },
+          { label: "Copiar hash", onSelect: () => navigator.clipboard?.writeText(e.hash) },
+        ] })}
         page={page} pageSize={50} onPage={(p) => set({ page: p }, false)} search={values.actor ?? ""} onSearch={(s) => set({ actor: s })}
         searchPlaceholder="Filtrar por actor…" storageKey="audit"
         toolbar={<select aria-label="Entidad" className="field w-auto" value={values.entity_type ?? ""} onChange={(e) => set({ entity_type: e.target.value || null })}>
@@ -345,7 +499,7 @@ function AuditLog() {
           {["device", "department", "software_product", "software_policy", "inventory_run", "inventory_snapshot", "alert", "review_case", "app_setting", "inventory_source", "user"].map((t) => <option key={t} value={t}>{t}</option>)}
         </select>}
         columns={[
-          { id: "at", header: "Fecha (UTC)", cell: (e) => <span className="whitespace-nowrap text-muted">{fmtDateTime(e.at)}</span> },
+          { id: "at", header: "Hora", cell: (e) => <span className="code whitespace-nowrap text-muted" title={fmtDateTime(e.at)}>{hhmm(e.at)}</span> },
           { id: "actor", header: "Actor", cell: (e) => e.actor },
           { id: "action", header: "Acción", cell: (e) => <span className="font-mono text-xs">{e.action}</span> },
           { id: "summary", header: "Resumen", cell: (e) => e.summary ?? "—" },

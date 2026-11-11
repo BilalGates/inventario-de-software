@@ -1,30 +1,127 @@
 import { Download, Plus } from "lucide-react";
-import { useState } from "react";
-import { Link } from "react-router-dom";
-import { Badge, Button, EmptyState, ErrorState, Field, Modal, PageHeader, Spinner } from "@/components/ui";
+import { useMemo, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { DataTable, type Column } from "@/components/DataTable";
+import { Bar, BigNum, Kpi, KpiStrip, ScreenHeader, StatusDot } from "@/components/kit";
+import { Badge, Button, ConfirmDialog, EmptyState, ErrorState, Field, Modal, Spinner, useToast } from "@/components/ui";
 import { api } from "@/lib/api";
 import { useCan } from "@/lib/auth";
+import { useDashboard, type FleetDevice } from "@/lib/dashboard";
 import { useAction } from "@/lib/hooks";
 import { useDepartments } from "@/lib/queries";
 import type { Department } from "@/lib/types";
 
+const NO_DEPT = "Sin departamento";
+
 export default function Departments() {
   const can = useCan();
+  const nav = useNavigate();
+  const toast = useToast();
   const q = useDepartments();
+  const dash = useDashboard().data;
   const [editing, setEditing] = useState<Department | "new" | null>(null);
+  const [toggling, setToggling] = useState<Department | null>(null);
   const [showInactive, setShowInactive] = useState(false);
+  const toggle = useAction((d: Department) => api.send("PATCH", `/departments/${d.id}`, { active: !d.active }), {
+    success: "Departamento actualizado", invalidate: [["departments"], ["dashboard"]], onSuccess: () => setToggling(null),
+  });
+  const fleet = useMemo(() => {
+    const by = new Map<string, FleetDevice[]>();
+    (dash?.devices.fleet ?? []).forEach((d) => by.set(d.department ?? NO_DEPT, [...(by.get(d.department ?? NO_DEPT) ?? []), d]));
+    return by;
+  }, [dash]);
   if (q.isLoading) return <Spinner />;
   if (q.error) return <ErrorState error={q.error} retry={q.refetch} />;
-  const items = (q.data?.items ?? []).filter((d) => showInactive || d.active);
-  const inactive = (q.data?.items ?? []).filter((d) => !d.active).length;
+  const all = q.data?.items ?? [];
+  const items = all.filter((d) => showInactive || d.active);
+  const inactive = all.filter((d) => !d.active).length;
+  const unassigned = q.data?.unassigned_devices ?? 0;
+  const clean = (list: FleetDevice[]) => {
+    const work = list.filter((d) => d.state !== "infra");
+    return work.length ? Math.round((work.filter((d) => d.state === "ok").length / work.length) * 100) : null;
+  };
+  const active = items.filter((d) => d.active);
+  const maxDevices = Math.max(1, ...items.map((d) => d.devices ?? 0), unassigned);
+  const noOwner = active.filter((d) => !d.manager).length;
+  const users = items.reduce((a, d) => a + (d.users ?? 0), 0);
+  const looseDevices = fleet.get(NO_DEPT) ?? [];
+
+  const cols: Column<Department>[] = [
+    { id: "name", header: "Departamento", cell: (d) => (
+      <div className="min-w-0">
+        <h3 className="flex items-center gap-2 text-[15px] font-semibold">
+          <Link to={`/departamentos/${d.id}`} className="hover:underline hover:underline-offset-4">{d.name}</Link>
+          {!d.active && <Badge>Inactivo</Badge>}
+        </h3>
+        <p className={d.manager ? "text-xs text-muted" : "text-xs text-signal"}>{d.manager ? `Responsable: ${d.manager}` : "Sin responsable"}</p>
+      </div>
+    ) },
+    { id: "devices", header: "Sus equipos", cell: (d) => {
+      const list = fleet.get(d.name) ?? [];
+      return list.length === 0 ? <span className="text-muted">Sin equipos</span> : (
+        <div className="flex max-w-80 flex-wrap gap-1 whitespace-normal">
+          {list.map((x) => <StatusDot key={x.id} kind={x.state ?? "ok"} title={x.name} />)}
+        </div>
+      );
+    } },
+    { id: "users", header: "Usuarios", align: "right", cell: (d) => <span className="disp font-semibold">{d.users ?? 0}</span> },
+    { id: "apps", header: "Apps", align: "right", cell: (d) => <span className="disp font-semibold">{d.software ?? 0}</span> },
+    { id: "clean", header: "Limpios", align: "right", cell: (d) => {
+      const pct = clean(fleet.get(d.name) ?? []);
+      return pct === null ? <span className="text-muted">—</span>
+        : <span className={pct < 50 ? "disp font-semibold text-signal" : "disp font-semibold"}>{pct} %</span>;
+    } },
+    { id: "cc", header: "Centro de coste", cell: (d) => <span className="code text-muted">{d.cost_center ?? "—"}</span> },
+    { id: "desc", header: "Descripción", hidden: true, cell: (d) => <span className="block max-w-72 truncate text-muted">{d.description ?? "—"}</span> },
+  ];
+
+  const barRows = [...active.map((d) => ({ name: d.name, n: d.devices ?? 0, none: false })),
+    ...(unassigned ? [{ name: NO_DEPT, n: unassigned, none: true }] : [])].sort((a, b) => b.n - a.n);
+  const cleanRows = active.map((d) => ({ name: d.name, pct: clean(fleet.get(d.name) ?? []) }))
+    .filter((r): r is { name: string; pct: number } => r.pct !== null);
 
   return (
     <>
-      <PageHeader eyebrow="Organización · Departamentos" title="Departamentos" description="Estructura organizativa. Independiente del tipo de hardware y del catálogo de software."
+      <ScreenHeader eyebrow="Organización · Departamentos" title={`${active.length} departamentos`}
+        sub={unassigned ? `· ${unassigned} ${unassigned === 1 ? "equipo sin asignar" : "equipos sin asignar"}` : undefined}
         actions={<>
           <Button icon={<Download className="size-4" />} onClick={() => api.download("/users/export", { format: "xlsx" })}>Exportar usuarios</Button>
           {can.write && <Button variant="primary" icon={<Plus className="size-4" />} onClick={() => setEditing("new")}>Nuevo departamento</Button>}
         </>} />
+      {items.length > 0 && (
+        <KpiStrip label="Resumen" className="mb-6">
+          <Kpi label="Equipos por departamento">
+            <ul className="flex flex-col gap-2 text-xs">
+              {barRows.map((r) => (
+                <li key={r.name} className="grid grid-cols-[7rem_minmax(0,1fr)_1.75rem] items-center gap-2.5">
+                  <span className="truncate text-fg-2">{r.name}</span>
+                  <Bar value={r.n} max={maxDevices} className={r.none ? "bg-chart-3" : "bg-chart-1"} />
+                  <b className="disp text-right">{r.n}</b>
+                </li>
+              ))}
+            </ul>
+          </Kpi>
+          <Kpi label="Equipos limpios" footer="Sin incidencias: conformes y sin software no autorizado">
+            <ul className="flex flex-col gap-2 text-xs">
+              {cleanRows.map((r) => (
+                <li key={r.name} className="grid grid-cols-[7rem_minmax(0,1fr)_2.5rem] items-center gap-2.5">
+                  <span className="truncate text-fg-2">{r.name}</span>
+                  <Bar value={r.pct} max={100} className={r.pct < 50 ? "bg-signal-fill" : "bg-chart-1"} />
+                  <b className={r.pct < 50 ? "disp text-right text-signal" : "disp text-right"}>{r.pct} %</b>
+                </li>
+              ))}
+            </ul>
+          </Kpi>
+          <Kpi label="Sin departamento">
+            <BigNum value={unassigned}>{unassigned === 1 ? "equipo" : "equipos"}</BigNum>
+            {looseDevices.length > 0 && <div className="flex flex-wrap gap-1">{looseDevices.map((x) => <StatusDot key={x.id} kind={x.state ?? "ok"} title={x.name} />)}</div>}
+            {unassigned > 0 && <Link to="/dispositivos?unassigned=true" className="link mt-auto text-[13px]">Asignarlos ahora →</Link>}
+          </Kpi>
+          <Kpi label="Personas" footer={noOwner ? `${noOwner} ${noOwner === 1 ? "departamento" : "departamentos"} sin responsable` : "Todos con responsable"}>
+            <BigNum value={users}>usuarios con equipo</BigNum>
+          </Kpi>
+        </KpiStrip>
+      )}
       {inactive > 0 && (
         <label className="mb-3 flex items-center gap-2 text-sm text-muted">
           <input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} />
@@ -34,33 +131,32 @@ export default function Departments() {
       {items.length === 0 ? (
         <div className="card"><EmptyState title="Aún no hay departamentos">Cree los departamentos de Asserta para asignar dispositivos y usuarios.</EmptyState></div>
       ) : (
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {items.map((d) => (
-            <Link key={d.id} to={`/departamentos/${d.id}`} className="card group p-4 transition-colors hover:border-muted/40">
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <h2 className="truncate font-semibold group-hover:text-accent">{d.name}</h2>
-                  <p className="truncate text-xs text-muted">{d.manager ? `Responsable: ${d.manager}` : "Sin responsable"}</p>
-                </div>
-                {!d.active && <Badge>Inactivo</Badge>}
-              </div>
-              {d.description && <p className="mt-2 line-clamp-2 text-muted">{d.description}</p>}
-              <dl className="mt-4 grid grid-cols-3 gap-2 border-t border-border pt-3 text-center">
-                {[["Dispositivos", d.devices], ["Usuarios", d.users], ["Aplicaciones", d.software]].map(([k, v]) => (
-                  <div key={k as string}><dd className="num text-lg font-semibold">{v ?? 0}</dd><dt className="text-2xs text-muted">{k}</dt></div>
-                ))}
-              </dl>
-            </Link>
-          ))}
-          {!!q.data?.unassigned_devices && (
-            <Link to="/dispositivos?unassigned=true" className="card flex flex-col justify-center border-dashed p-4 text-center hover:border-muted/40">
-              <span className="num text-2xl font-semibold text-warn">{q.data.unassigned_devices}</span>
-              <span className="text-sm text-muted">dispositivos sin departamento</span>
-            </Link>
-          )}
-        </div>
+        <DataTable columns={cols} rows={items} rowKey={(d) => d.id} storageKey="departments"
+          onRowClick={(d) => nav(`/departamentos/${d.id}`)}
+          rowMenu={(d) => ({ title: d.name, entries: [
+            { label: "Abrir departamento", hint: "Intro", onSelect: () => nav(`/departamentos/${d.id}`) },
+            { label: "Ver sus equipos", onSelect: () => nav(`/dispositivos?department_id=${d.id}`) },
+            { label: "Ver su software", onSelect: () => nav(`/software?department_id=${d.id}`) },
+            ...(can.write ? ["separator" as const,
+              { label: "Editar…", onSelect: () => setEditing(d) },
+              { label: "Asignar responsable…", onSelect: () => setEditing(d) },
+              { label: "Mover equipos aquí…", onSelect: () => nav("/dispositivos?unassigned=true") }] : []),
+            { label: "Exportar Excel del departamento", onSelect: () => api.download("/software/export", { format: "xlsx", department_id: d.id })
+              .catch((e: Error) => toast("danger", e.message)) },
+            ...(can.write ? ["separator" as const, d.active
+              ? { label: "Desactivar…", danger: true, onSelect: () => setToggling(d) }
+              : { label: "Activar", onSelect: () => setToggling(d) }] : []),
+          ] })}
+          footer="Cada cuadro es un equipo del departamento, con la misma leyenda que el Panel. Clic derecho o ⋯ para las acciones." />
       )}
       {editing && <DepartmentForm dept={editing === "new" ? null : editing} onClose={() => setEditing(null)} />}
+      <ConfirmDialog open={!!toggling} onClose={() => setToggling(null)} busy={toggle.isPending}
+        onConfirm={() => { if (toggling) toggle.mutate(toggling); }} danger={toggling?.active}
+        title={toggling?.active ? `Desactivar ${toggling.name}` : `Activar ${toggling?.name ?? ""}`}
+        confirmLabel={toggling?.active ? "Desactivar" : "Activar"}>
+        {toggling?.active ? "No podrá asignarse a nuevos dispositivos. Solo es posible si no tiene dispositivos asignados; su histórico se conserva."
+          : "Volverá a estar disponible para asignar dispositivos."}
+      </ConfirmDialog>
     </>
   );
 }

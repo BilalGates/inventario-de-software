@@ -1,35 +1,54 @@
 import { useQuery } from "@tanstack/react-query";
 import { Download, FolderInput, Plus } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ComplianceBadge, DeviceStatusBadge, FreshnessBadge, SourceBadge } from "@/components/badges";
-import { DataTable, type Column } from "@/components/DataTable";
+import { ComplianceBadge, DeviceStatusBadge, SourceBadge } from "@/components/badges";
+import { DataTable, type Column, type TableGroup } from "@/components/DataTable";
+import { useDeviceActions, type DeviceLike } from "@/components/DeviceActions";
 import { DeviceForm, type DeviceFormValues } from "@/components/DeviceForm";
-import { Button, Field, Modal, PageHeader, Segmented, Stat, StatStrip } from "@/components/ui";
-import { Meter, fmtPct, pct } from "@/components/viz";
+import {
+  BigNum, DOT_LABEL, Donut, FilterChips, Gauge, HATCH, Kpi, KpiStrip, Legend, ScreenHeader, StackBar, StatusDot, Swatch, Waffle,
+  type DotKind, type Segment,
+} from "@/components/kit";
+import { Button, Field, Modal, Segmented } from "@/components/ui";
 import { useDashboard, type DashboardData } from "@/lib/dashboard";
 import { api } from "@/lib/api";
 import { useCan } from "@/lib/auth";
-import { SOURCE_LABEL, fmtBytes, fmtDate, fmtRelative, isFailing, osFamily } from "@/lib/format";
+import { fmtBytes, fmtDate, fmtNumber, fmtRelative, isFailing, osFamily } from "@/lib/format";
 import { useAction, useUrlState } from "@/lib/hooks";
 import { useDepartments, useDeviceTypes } from "@/lib/queries";
 import type { DeviceDetail, DeviceRow, Paged } from "@/lib/types";
 
-const PAGE_SIZE = 50;
+const INFRA = "Infraestructura";
+const NO_DEPT = "Sin departamento";
+/** El parque son decenas de equipos: se cargan todos para agrupar y filtrar por estado en el cliente. */
+const ALL = 1000;
 
-const columns: Column<DeviceRow>[] = [
+const state = (d: DeviceRow): DotKind => d.state ?? "ok";
+const initials = (name: string) => name.split(/[\s.@]+/).filter(Boolean).slice(0, 2).map((p) => p[0]!.toUpperCase()).join("");
+
+const columns = (grouped: boolean): Column<DeviceRow>[] => [
   { id: "name", header: "Equipo", sortKey: "name", cell: (d) => {
-    const model = [d.manufacturer, d.model].filter(Boolean).join(" ");
+    const model = [[d.manufacturer, d.model].filter(Boolean).join(" "), d.device_type].filter(Boolean).join(" · ");
     return (
-      <div className="min-w-0">
-        <Link to={`/dispositivos/${d.id}`} className="code text-[13px] font-medium text-fg hover:underline hover:underline-offset-4">{d.name}</Link>
-        {model && <p className="max-w-56 truncate text-xs text-muted" title={model}>{model}</p>}
+      <div className="flex min-w-0 items-center gap-3">
+        <StatusDot kind={state(d)} title={DOT_LABEL[state(d)]} />
+        <div className="min-w-0">
+          <Link to={`/dispositivos/${d.id}`} className="block text-[13px] font-semibold text-fg hover:underline hover:underline-offset-4">{d.name}</Link>
+          {model && <p className="max-w-60 truncate text-xs text-muted" title={model}>{model}</p>}
+        </div>
       </div>
     );
   } },
-  { id: "user", header: "Usuario", cell: (d) => <span className="block max-w-44 truncate" title={d.primary_user_upn ?? ""}>{d.primary_user ?? "—"}</span> },
-  { id: "department", header: "Departamento", sortKey: "department",
-    cell: (d) => d.department ?? <span className="italic text-muted">Sin asignar</span> },
+  { id: "user", header: "Usuario", cell: (d) => d.primary_user ? (
+    <span className="flex max-w-52 items-center gap-2.5" title={d.primary_user_upn ?? ""}>
+      <span aria-hidden className="flex size-7 shrink-0 items-center justify-center rounded-full bg-subtle text-2xs font-semibold text-fg-2">
+        {initials(d.primary_user)}</span>
+      <span className="truncate">{d.primary_user}</span>
+    </span>
+  ) : <span className="text-muted">Sin usuario</span> },
+  ...(grouped ? [] : [{ id: "department", header: "Departamento", sortKey: "department",
+    cell: (d: DeviceRow) => d.department ?? <span className="italic text-muted">Sin asignar</span> }]),
   { id: "os", header: "Sistema", sortKey: "os_version", cell: (d) => {
     const fam = osFamily(d.os_name, d.os_version);
     return <span className={fam === "Windows 10" ? "text-signal" : "text-fg-2"} title={[d.os_name, d.os_version].filter(Boolean).join(" ")}>{fam}</span>;
@@ -37,7 +56,7 @@ const columns: Column<DeviceRow>[] = [
   { id: "sources", header: "Fuentes",
     cell: (d) => d.sources?.length ? <div className="flex gap-1">{d.sources.map((s) => <SourceBadge key={s} source={s} />)}</div>
       : <SourceBadge source="manual" /> },
-  { id: "compliance", header: "Cumplimiento", cell: (d) => (
+  { id: "compliance", header: "Cumplimiento", cell: (d) => d.state === "infra" ? <span className="text-muted">—</span> : (
     <div className="flex flex-col items-start gap-0.5">
       <ComplianceBadge value={d.compliance_state} reasons={d.compliance_reasons} />
       {isFailing(d.compliance_state) && d.compliance_reasons?.[0] && (
@@ -48,10 +67,8 @@ const columns: Column<DeviceRow>[] = [
     </div>
   ) },
   { id: "freshness", header: "Actualidad", sortKey: "last_seen_at", cell: (d) => (
-    <div className="flex flex-col items-start gap-0.5">
-      <FreshnessBadge value={d.freshness} />
-      <span className="code text-2xs text-muted" title={d.last_seen_at ?? ""}>{fmtRelative(d.last_seen_at)}</span>
-    </div>
+    <span className={d.freshness === "stale" ? "text-signal" : "text-muted"} title={d.last_seen_at ?? ""}>
+      {d.freshness === "never_synced" ? "Sin fuente" : fmtRelative(d.last_seen_at)}</span>
   ) },
   { id: "software", header: "Apps", align: "right", cell: (d) => <span className="disp text-sm font-semibold">{d.software_count ?? 0}</span> },
   { id: "serial", header: "Nº de serie", sortKey: "serial_number", hidden: true,
@@ -61,8 +78,6 @@ const columns: Column<DeviceRow>[] = [
   { id: "ram", header: "RAM", align: "right", hidden: true, cell: (d) => fmtBytes(d.ram_bytes, true) },
   { id: "storage", header: "Disco", align: "right", hidden: true, cell: (d) => fmtBytes(d.storage_total_bytes) },
   { id: "status", header: "Estado", sortKey: "status", hidden: true, cell: (d) => <DeviceStatusBadge status={d.status} /> },
-  { id: "seen", header: "Última observación", hidden: true,
-    cell: (d) => <span className="whitespace-nowrap text-muted" title={d.last_seen_at ?? ""}>{fmtRelative(d.last_seen_at)}</span> },
   { id: "location", header: "Ubicación", hidden: true, cell: (d) => d.location ?? "—" },
   { id: "purchase", header: "Fecha de adquisición", hidden: true, cell: (d) => <span className="text-muted">{fmtDate(d.purchase_date)}</span> },
   { id: "cost", header: "Coste", align: "right", hidden: true, cell: (d) => d.cost ?? "—" },
@@ -71,103 +86,169 @@ const columns: Column<DeviceRow>[] = [
   ) },
 ];
 
-const OS_ORDER = ["Windows 11", "Windows 10", "Windows Server", "macOS"];
-const OS_COLOR: Record<string, string> = { "Windows 11": "bg-chart-1", "Windows 10": "bg-signal-fill", "Windows Server": "bg-chart-2", macOS: "bg-chart-3" };
+// ------------------------------------------------------------------ KPI visuales
+const OS_STROKE: Record<string, string> = { "Windows 11": "stroke-chart-1", "Windows Server": "stroke-chart-2", "Windows 10": "stroke-signal-fill",
+  Desconocido: "stroke-border-strong" };
+const OS_SWATCH: Record<string, string> = { "Windows 11": "bg-chart-1", "Windows Server": "bg-chart-2", "Windows 10": "bg-signal-fill",
+  Desconocido: "bg-border-strong" };
+const TYPE: Record<string, [string, string]> = {
+  laptop: ["Portátil", "bg-chart-1"], desktop: ["Sobremesa", "bg-chart-2"], server: ["Servidor", "bg-chart-3"],
+  peripheral: ["Red / otros", "border-[1.5px] border-dashed border-muted"], mobile: ["Móvil", "bg-chart-2/60"],
+  unknown: ["Sin clasificar", "bg-chart-4"],
+};
 
-/** Franja de resumen del parque (datos del Panel, ya en caché). */
-function DeviceSummary({ data }: { data: DashboardData }) {
+function DeviceSummary({ data, rows }: { data: DashboardData; rows: DeviceRow[] }) {
   const d = data.devices;
-  const os = Object.entries(d.by_os ?? {}).sort((a, b) => {
-    const ia = OS_ORDER.indexOf(a[0]), ib = OS_ORDER.indexOf(b[0]);
-    return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || b[1] - a[1];
+  const os = Object.entries(d.by_os ?? {}).sort((a, b) => b[1] - a[1]);
+  const top = os[0];
+  const osSeg: Segment[] = os.map(([n, c]) => ({ label: n, value: c, className: "", strokeClass: OS_STROKE[n] ?? "stroke-chart-3" }));
+  const c = d.compliance;
+  const ok = c.compliant ?? 0;
+  const grace = c.inGracePeriod ?? 0;
+  const nc = (c.noncompliant ?? 0) + (c.error ?? 0) + (c.conflict ?? 0);
+  const known = ok + grace + nc;
+  const cov = { both: 0, intune: 0, panda: 0, manual: 0 };
+  rows.forEach((r) => {
+    const s = new Set(r.sources ?? []);
+    if (s.has("intune") && s.has("panda")) cov.both++;
+    else if (s.has("intune")) cov.intune++;
+    else if (s.has("panda")) cov.panda++;
+    else cov.manual++;
   });
-  const osTotal = os.reduce((a, [, n]) => a + n, 0);
-  const win10 = d.by_os?.["Windows 10"] ?? 0;
-  const sources = Object.entries(d.by_source ?? {}).sort((a, b) => (a[0] === "manual" ? 1 : b[0] === "manual" ? -1 : b[1] - a[1]));
-  const comp = d.compliance;
-  const known = Object.entries(comp).filter(([k]) => k !== "None" && k !== "null").reduce((a, [, n]) => a + n, 0);
-  const ok = comp.compliant ?? 0;
-  const nc = comp.noncompliant ?? 0;
-  const grace = comp.inGracePeriod ?? 0;
+  const covSeg: Segment[] = [
+    { label: "Intune + Panda", value: cov.both, className: "bg-chart-1" },
+    { label: "Solo Intune", value: cov.intune, className: "bg-chart-2" },
+    { label: "Solo Panda", value: cov.panda, className: "bg-chart-3" },
+    { label: "Inventario manual", value: cov.manual, className: HATCH },
+  ];
+  const typeCounts = rows.reduce<Record<string, number>>((a, r) => ({ ...a, [r.type_code ?? "unknown"]: (a[r.type_code ?? "unknown"] ?? 0) + 1 }), {});
+  const typeOrder = Object.keys(TYPE).filter((k) => typeCounts[k]);
+  const waffle = typeOrder.flatMap((k) => Array.from({ length: typeCounts[k] }, (_, i) => ({ key: `${k}${i}`, className: TYPE[k][1], title: TYPE[k][0] })));
   return (
-    <StatStrip label="Resumen del parque" minCell="15rem" className="mb-6">
-      <div className="flex flex-col gap-3 bg-surface px-5 py-5">
-        <span className="eyebrow">Sistema operativo</span>
-        <div role="img" aria-label={os.map(([n, c]) => `${n}: ${c}`).join(", ")} className="flex h-2 gap-0.5 overflow-hidden rounded-sm">
-          {os.map(([n, c]) => <span key={n} className={OS_COLOR[n] ?? "bg-chart-4"} style={{ width: `${pct(c, osTotal)}%` }} />)}
+    <KpiStrip label="Resumen del parque" className="mb-6">
+      <Kpi label="Sistema operativo" footer={d.by_os?.["Windows 10"] ? "Windows 10 sin soporte desde oct. 2025" : undefined}>
+        <div className="flex items-center gap-4">
+          <Donut segments={osSeg} center={top?.[1] ?? 0} caption={top?.[0]} label={os.map(([n, v]) => `${n}: ${v}`).join(", ")} />
+          <Legend className="flex-1" items={os.slice(1).map(([n, v]) => ({ label: n, value: v, tone: n === "Windows 10" ? "signal" : undefined,
+            swatch: <Swatch className={OS_SWATCH[n] ?? "bg-chart-3"} /> }))} />
         </div>
-        <ul className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-          {os.map(([n, c]) => (
-            <li key={n} className="flex gap-2">
-              <span className={n === "Windows 10" ? "flex-1 text-signal" : "flex-1 text-muted"}>{n}</span>
-              <span className={n === "Windows 10" ? "disp font-semibold text-signal" : "disp font-semibold"}>{c}</span>
-            </li>
+      </Kpi>
+      <Kpi label="Cumplimiento Intune">
+        {known === 0 ? <p className="text-sm text-muted">Sin datos de Intune</p> : <>
+          <Gauge label={`${ok} conformes, ${grace} en gracia, ${nc} no conformes`}
+            segments={[{ label: "Conformes", value: ok, className: "", strokeClass: "stroke-chart-1" },
+              { label: "En gracia", value: grace, className: "", strokeClass: "stroke-chart-2" },
+              { label: "No conformes", value: nc, className: "", strokeClass: "stroke-signal-fill" }]}
+            center={<span className="disp text-[32px] font-semibold">{Math.round((ok / known) * 100)}<span className="text-base text-muted"> %</span></span>} />
+          <p className="text-center text-xs text-muted">
+            <b className="text-fg">{ok}</b> conformes{grace ? <> · <b className="text-fg">{grace}</b> en gracia</> : null} ·{" "}
+            <Link to="/dispositivos?state=nc" className={nc ? "font-semibold text-signal hover:underline" : ""}>{nc} no conformes</Link>
+          </p>
+        </>}
+      </Kpi>
+      <Kpi label="Cobertura por fuente">
+        <BigNum value={rows.length - cov.manual}>de {rows.length} con fuente automática</BigNum>
+        <StackBar segments={covSeg} label={covSeg.map((s) => `${s.label}: ${s.value}`).join(", ")} />
+        <Legend items={covSeg.filter((s) => s.value).map((s) => ({ label: s.label, value: s.value, swatch: <Swatch className={s.className} /> }))} />
+      </Kpi>
+      <Kpi label="Tipo de equipo">
+        <Waffle items={waffle} label={typeOrder.map((k) => `${typeCounts[k]} ${TYPE[k][0].toLowerCase()}`).join(", ")} />
+        <ul className="grid grid-cols-2 gap-x-3.5 gap-y-1.5 text-xs">
+          {typeOrder.map((k) => (
+            <li key={k} className="flex items-center gap-2"><Swatch className={TYPE[k][1]} /><span className="flex-1 text-fg-2">{TYPE[k][0]}</span><b className="disp">{typeCounts[k]}</b></li>
           ))}
         </ul>
-        {win10 > 0 && <p className="text-xs text-muted">Windows 10 sin soporte desde oct 2025</p>}
-      </div>
-      <div className="flex flex-col gap-3 bg-surface px-5 py-5">
-        <span className="eyebrow">Cobertura por fuente</span>
-        <ul className="flex flex-col gap-2.5 text-[13px]">
-          {sources.map(([src, n]) => (
-            <li key={src} className="flex flex-col gap-1.5">
-              <div className="flex"><span className="flex-1">{SOURCE_LABEL[src] ?? src}</span><span className="code">{n}</span></div>
-              <Meter value={n} max={d.total} className={src === "manual" ? "bg-chart-3" : "bg-fg"} />
-            </li>
-          ))}
-        </ul>
-      </div>
-      <Stat label="Cumplimiento Intune" value={known ? <>{fmtPct(pct(ok, known))}<span className="text-[20px] text-muted"> %</span></> : "—"}
-        hint={<>{ok} conformes · <span className={nc ? "font-medium text-signal" : ""}>{nc} no conformes</span>{grace ? ` · ${grace} en gracia` : ""}</>} />
-      <Stat label="Sin observar" value={d.stale} tone={d.stale ? "warn" : undefined}
-        hint={d.stale ? "sin datos recientes de ninguna fuente" : "todos los equipos con datos recientes"} />
-    </StatStrip>
+      </Kpi>
+    </KpiStrip>
   );
 }
+
+// ------------------------------------------------------------------ Página
+type StateFilter = "all" | "clean" | "alert" | "nc" | "manual" | "retired";
+const MATCH: Record<StateFilter, (d: DeviceRow) => boolean> = {
+  all: () => true, retired: () => true,
+  clean: (d) => state(d) === "ok",
+  alert: (d) => state(d) === "alert" || state(d) === "alertnc",
+  nc: (d) => state(d) === "nc" || state(d) === "alertnc",
+  manual: (d) => state(d) === "infra",
+};
 
 export default function Devices() {
   const can = useCan();
   const nav = useNavigate();
-  const { values, set, page } = useUrlState(["q", "sort", "department_id", "device_type_id", "freshness", "unassigned"] as const);
+  const { values, set } = useUrlState(["q", "sort", "state", "view", "department_id", "device_type_id", "unassigned"] as const);
   const [selected, setSelected] = useState<Set<number | string>>(new Set());
   const [creating, setCreating] = useState(false);
   const [moving, setMoving] = useState(false);
   const depts = useDepartments().data?.items ?? [];
   const types = useDeviceTypes().data ?? [];
   const dash = useDashboard().data;
-  const filters = { ...values, page, page_size: PAGE_SIZE };
-  const q = useQuery({
-    queryKey: ["devices", filters],
-    queryFn: () => api.get<Paged<DeviceRow>>("/devices", filters),
-    placeholderData: (prev) => prev,
-  });
+  const actions = useDeviceActions();
+  const filter = (values.state ?? "all") as StateFilter;
+  const grouped = values.view !== "list";
+  const params = { q: values.q, sort: values.sort, department_id: values.department_id, device_type_id: values.device_type_id,
+    unassigned: values.unassigned, freshness: filter === "retired" ? "retired" : undefined, page_size: ALL };
+  const q = useQuery({ queryKey: ["devices", params], queryFn: () => api.get<Paged<DeviceRow>>("/devices", params),
+    placeholderData: (prev) => prev });
+  const all = q.data?.items ?? [];
+  const rows = useMemo(() => all.filter(MATCH[filter]), [all, filter]);
   const create = useAction((v: DeviceFormValues) => api.send<DeviceDetail>("POST", "/devices", v), {
     success: "Dispositivo creado", invalidate: [["devices"], ["dashboard"], ["departments"]],
     onSuccess: (d) => nav(`/dispositivos/${d.id}`),
   });
 
+  const groups: TableGroup<DeviceRow>[] | undefined = useMemo(() => {
+    if (!grouped) return undefined;
+    const by = new Map<string, DeviceRow[]>();
+    rows.forEach((d) => {
+      const g = state(d) === "infra" ? INFRA : d.department ?? NO_DEPT;
+      by.set(g, [...(by.get(g) ?? []), d]);
+    });
+    const rank = (n: string) => (n === INFRA ? 2 : n === NO_DEPT ? 1 : 0);
+    return [...by.entries()].sort((a, b) => rank(a[0]) - rank(b[0]) || b[1].length - a[1].length || a[0].localeCompare(b[0]))
+      .map(([name, list]) => {
+        const n = (k: DotKind[]) => list.filter((d) => k.includes(state(d))).length;
+        const issues = n(["alert", "nc", "alertnc"]);
+        return {
+          key: name, label: name, rows: list,
+          summary: <>
+            {name === INFRA ? `${list.length} equipos con inventario manual` : issues ? `${issues} con incidencias` : "todo limpio"}
+            <span className="w-32"><StackBar height="h-2" label={`Estado de ${name}`} segments={[
+              { label: "Limpios", value: n(["ok"]), className: "bg-chart-1" },
+              { label: "No autorizado", value: n(["alert", "alertnc"]), className: "bg-signal-fill" },
+              { label: "No conformes", value: n(["nc"]), className: "bg-signal-fill/40" },
+              { label: "Manual", value: n(["infra"]), className: HATCH },
+            ]} /></span>
+          </>,
+        };
+      });
+  }, [rows, grouped]);
+
+  const count = (f: StateFilter) => all.filter(MATCH[f]).length;
+  const like = (d: DeviceRow): DeviceLike => ({ id: d.id, name: d.name, serial_number: d.serial_number, status: d.status,
+    intune: d.sources?.includes("intune") });
+  const total = dash?.devices.total ?? all.length;
+  const deptCount = dash?.departments.length;
+
   return (
     <>
-      <PageHeader eyebrow="Inventario · Dispositivos" title="Dispositivos"
-        description={dash ? `${dash.devices.total} equipos registrados. Intune y Panda los observan en cada sincronización; el resto se da de alta a mano.`
-          : "Activos tecnológicos con identidad única, de Intune, Panda o alta manual."}
+      <ScreenHeader eyebrow="Inventario · Dispositivos" title={`${fmtNumber(total)} equipos`}
+        sub={deptCount ? `en ${deptCount} departamentos` : undefined}
         actions={<>
           <Button icon={<Download className="size-4" />}
-            onClick={() => api.download("/devices/export", { ...values, format: "xlsx", q: values.q })}>Exportar</Button>
+            onClick={() => api.download("/devices/export", { format: "xlsx", q: values.q, department_id: values.department_id,
+              device_type_id: values.device_type_id })}>Exportar</Button>
           {can.write && <Button variant="primary" icon={<Plus className="size-4" />} onClick={() => setCreating(true)}>Nuevo dispositivo</Button>}
         </>} />
-      {dash && <DeviceSummary data={dash} />}
+      {dash && <DeviceSummary data={dash} rows={filter === "retired" ? [] : all} />}
       <DataTable
-        columns={columns}
-        rows={q.data?.items}
-        total={q.data?.total}
+        columns={columns(grouped)}
+        rows={rows}
+        groups={groups}
         rowKey={(d) => d.id}
         loading={q.isLoading}
         error={q.error}
         retry={q.refetch}
-        page={page}
-        pageSize={PAGE_SIZE}
-        onPage={(p) => set({ page: p }, false)}
         sort={values.sort}
         onSort={(s) => set({ sort: s })}
         search={values.q ?? ""}
@@ -177,8 +258,23 @@ export default function Devices() {
         selectable={can.write}
         selected={selected}
         onSelectedChange={setSelected}
+        onRowClick={(d) => nav(`/dispositivos/${d.id}`)}
+        rowMenu={(d, sel) => ({ title: sel.length > 1 ? `${sel.length} equipos` : d.name, entries: actions.entries(like(d), sel.map(like)) })}
         bulkActions={<Button size="sm" icon={<FolderInput className="size-4" />} onClick={() => setMoving(true)}>Mover</Button>}
+        footer="Clic derecho sobre cualquier equipo, o el botón ⋯, para ver sus acciones. Con varios seleccionados, la acción se aplica a todos."
+        header={<div className="flex flex-wrap items-center gap-3 py-3">
+          <FilterChips label="Estado" value={filter} onChange={(v) => set({ state: v === "all" ? null : v })} options={[
+            { id: "all", label: "Todos", count: filter === "retired" ? undefined : all.length },
+            { id: "clean", label: "Limpios", count: count("clean"), dot: "ok" },
+            { id: "alert", label: "No autorizado", count: count("alert"), dot: "alert" },
+            { id: "nc", label: "No conformes", count: count("nc"), dot: "nc" },
+            { id: "manual", label: "Manuales", count: count("manual"), dot: "infra" },
+            { id: "retired", label: "Bajas", count: dash?.devices.by_status.retired ?? 0 },
+          ]} />
+        </div>}
         toolbar={<>
+          <Segmented label="Vista" value={grouped ? "dept" : "list"} onChange={(v) => set({ view: v === "dept" ? null : "list" })}
+            options={[{ id: "dept", label: "Por departamento" }, { id: "list", label: "Lista" }]} />
           <select aria-label="Departamento" className="field w-auto" value={values.unassigned ? "none" : values.department_id ?? ""}
             onChange={(e) => set(e.target.value === "none" ? { unassigned: "true", department_id: null }
               : { department_id: e.target.value || null, unassigned: null })}>
@@ -191,16 +287,9 @@ export default function Devices() {
             <option value="">Todos los tipos</option>
             {types.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
-          <Segmented label="Actualidad" value={values.freshness ?? "all"} onChange={(v) => set({ freshness: v === "all" ? null : v })}
-            options={[
-              { id: "all", label: "Vigentes", count: dash?.devices.total },
-              { id: "current", label: "Al día", count: dash?.devices.current },
-              { id: "stale", label: "Sin observar", count: dash?.devices.stale },
-              { id: "never_synced", label: "Sin fuente", count: dash?.devices.never_synced },
-              { id: "retired", label: "Bajas", count: dash?.devices.by_status.retired ?? 0 },
-            ]} />
         </>}
       />
+      {actions.dialogs}
       {creating && <DeviceForm open title="Nuevo dispositivo" onClose={() => setCreating(false)} busy={create.isPending}
         onSubmit={(v) => create.mutate(v)} />}
       {moving && <BulkMove ids={[...selected].map(Number)} onClose={() => setMoving(false)}

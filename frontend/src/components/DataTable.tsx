@@ -1,6 +1,7 @@
-import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, Columns3, Search } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronDown, ChevronLeft, ChevronRight, Columns3, MoreHorizontal, Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { ContextMenu, useContextMenu, type MenuEntry } from "./ContextMenu";
 import { Button, EmptyState, ErrorState, Spinner, cx } from "./ui";
 
 export interface Column<T> {
@@ -40,6 +41,25 @@ interface Props<T> {
   bulkActions?: ReactNode;
   /** Fila superior opcional (p. ej. pestañas de estado), sobre la barra de herramientas. */
   header?: ReactNode;
+  /** Filas agrupadas con cabecera plegable (sustituye a `rows` para pintar; la selección sigue funcionando). */
+  groups?: TableGroup<T>[];
+  /** Menú de acciones de la fila (clic derecho o botón «⋯»). `selection` incluye la fila si estaba seleccionada. */
+  rowMenu?: (row: T, selection: T[]) => { title?: string; entries: MenuEntry[] };
+  /** Clic en la fila (fuera de enlaces, botones y casillas): normalmente abrir la ficha. */
+  onRowClick?: (row: T) => void;
+  /** Pie opcional bajo la tabla (ayuda breve). */
+  footer?: ReactNode;
+}
+
+export interface TableGroup<T> {
+  key: string;
+  label: ReactNode;
+  rows: T[];
+  /** Texto o mini gráfico a la derecha de la cabecera. */
+  summary?: ReactNode;
+  /** Junto al nombre (p. ej. un cuadro de estado o una mini barra). */
+  lead?: ReactNode;
+  defaultCollapsed?: boolean;
 }
 
 function readHidden(key: string | undefined, cols: Column<unknown>[]): Set<string> {
@@ -61,6 +81,8 @@ export function DataTable<T>(p: Props<T>) {
   const colsRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const visible = useMemo(() => p.columns.filter((c) => !hidden.has(c.id)), [p.columns, hidden]);
+  const ctx = useContextMenu();
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     if (!p.onSearch) return;
@@ -113,7 +135,7 @@ export function DataTable<T>(p: Props<T>) {
     }
   };
 
-  const rows = p.rows ?? [];
+  const rows = p.groups ? p.groups.flatMap((g) => g.rows) : p.rows ?? [];
   const keys = rows.map(p.rowKey);
   const selected = p.selected ?? new Set();
   const allSelected = keys.length > 0 && keys.every((k) => selected.has(k));
@@ -134,6 +156,47 @@ export function DataTable<T>(p: Props<T>) {
     if (p.sort === c.sortKey) p.onSort(`-${c.sortKey}`);
     else if (p.sort === `-${c.sortKey}`) p.onSort(null);
     else p.onSort(c.sortKey);
+  };
+
+  const menuFor = (row: T) => {
+    const k = p.rowKey(row);
+    const selection = selected.has(k) && selected.size > 1 ? rows.filter((r) => selected.has(p.rowKey(r))) : [row];
+    return p.rowMenu!(row, selection);
+  };
+  const colCount = visible.length + (p.selectable ? 1 : 0) + (p.rowMenu ? 1 : 0);
+  const renderRow = (row: T) => {
+    const k = p.rowKey(row);
+    return (
+      <tr key={k}
+        onContextMenu={p.rowMenu ? (e) => { const m = menuFor(row); ctx.openAt(e, m.entries, m.title); } : undefined}
+        onClick={p.onRowClick ? (e) => {
+          if ((e.target as HTMLElement).closest("a,button,input,label,select,textarea")) return;
+          p.onRowClick!(row);
+        } : undefined}
+        className={cx("border-t border-border first:border-t-0 transition-colors hover:bg-subtle",
+          p.onRowClick && "cursor-pointer", selected.has(k) && "bg-fg/[0.04]", p.rowClassName?.(row))}>
+        {p.selectable && (
+          <td className="w-10 py-3 pl-4 pr-1">
+            <input type="checkbox" aria-label="Seleccionar fila" checked={selected.has(k)}
+              onChange={() => toggleRow(k)} />
+          </td>
+        )}
+        {visible.map((c) => (
+          <td key={c.id} className={cx("whitespace-nowrap px-3 py-3 align-middle first:pl-4 last:pr-4", c.align === "right" && "num text-right", c.className)}>
+            {c.cell(row)}
+          </td>
+        ))}
+        {p.rowMenu && (
+          <td className="w-12 py-1.5 pr-2 text-right">
+            <button type="button" aria-label="Acciones" aria-haspopup="menu"
+              onClick={(e) => { const m = menuFor(row); ctx.openFrom(e.currentTarget, m.entries, m.title); }}
+              className="inline-flex size-9 items-center justify-center rounded-md text-muted transition-colors hover:bg-subtle hover:text-fg">
+              <MoreHorizontal className="size-4" />
+            </button>
+          </td>
+        )}
+      </tr>
+    );
   };
 
   const page = p.page ?? 1;
@@ -211,29 +274,31 @@ export function DataTable<T>(p: Props<T>) {
                   </th>
                 );
               })}
+              {p.rowMenu && <th className="w-12 border-b border-border" aria-label="Acciones" />}
             </tr>
           </thead>
-          <tbody>
-            {!p.loading && !p.error && rows.map((row) => {
-              const k = p.rowKey(row);
-              return (
-                <tr key={k} className={cx("border-t border-border first:border-t-0 transition-colors hover:bg-bg",
-                  selected.has(k) && "bg-fg/[0.04]", p.rowClassName?.(row))}>
-                  {p.selectable && (
-                    <td className="py-3 pl-4 pr-1">
-                      <input type="checkbox" aria-label="Seleccionar fila" checked={selected.has(k)}
-                        onChange={() => toggleRow(k)} />
-                    </td>
-                  )}
-                  {visible.map((c) => (
-                    <td key={c.id} className={cx("whitespace-nowrap px-3 py-3 align-middle first:pl-4 last:pr-4", c.align === "right" && "num text-right", c.className)}>
-                      {c.cell(row)}
-                    </td>
-                  ))}
+          {!p.loading && !p.error && !p.groups && <tbody>{rows.map(renderRow)}</tbody>}
+          {!p.loading && !p.error && p.groups?.map((g) => {
+            const isCollapsed = collapsed[g.key] ?? !!g.defaultCollapsed;
+            return (
+              <tbody key={g.key}>
+                <tr className="border-t border-border-strong bg-subtle/60">
+                  <td colSpan={colCount} className="p-0">
+                    <button type="button" aria-expanded={!isCollapsed}
+                      onClick={() => setCollapsed((c) => ({ ...c, [g.key]: !isCollapsed }))}
+                      className="flex min-h-12 w-full items-center gap-3 px-4 text-left text-sm font-semibold transition-colors hover:bg-subtle">
+                      <ChevronDown className={cx("size-4 text-muted transition-transform", isCollapsed && "-rotate-90")} aria-hidden />
+                      {g.lead}
+                      <span>{g.label}</span>
+                      <span className="font-normal text-muted">{g.rows.length}</span>
+                      {g.summary && <span className="ml-auto flex items-center gap-3 text-xs font-normal text-muted">{g.summary}</span>}
+                    </button>
+                  </td>
                 </tr>
-              );
-            })}
-          </tbody>
+                {!isCollapsed && g.rows.map(renderRow)}
+              </tbody>
+            );
+          })}
         </table>
         {p.loading && <Spinner />}
         {!p.loading && p.error != null && <ErrorState error={p.error} retry={p.retry} />}
@@ -241,6 +306,8 @@ export function DataTable<T>(p: Props<T>) {
           Ajuste la búsqueda o los filtros.</EmptyState>)}
       </div>
 
+      {p.footer && <p className="border-t border-border px-4 py-3 text-xs text-muted">{p.footer}</p>}
+      <ContextMenu menu={ctx.menu} onClose={ctx.close} />
       {p.onPage && total > 0 && (
         <div className="flex items-center justify-between gap-2 border-t border-border px-4 py-2.5 text-xs text-muted">
           <span className="code">
