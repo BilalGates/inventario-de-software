@@ -80,6 +80,55 @@
       transition-colors hover:border-muted focus:border-fg disabled:opacity-60;
   }
   textarea.field { @apply h-auto py-2; }
+
+  /*
+   * Desplegables: el mismo aspecto en toda la app. Cerrado, un campo con flecha propia; abierto
+   * (Edge/Chrome con `appearance: base-select`), un menú como el contextual. En otros navegadores
+   * la lista abierta sigue siendo la del sistema, pero el campo cerrado se ve igual.
+   */
+  select.field {
+    @apply cursor-pointer appearance-none pr-9 font-medium text-fg-2 hover:text-fg;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%238a847e' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.7rem center;
+    background-size: 16px;
+  }
+  select.field:disabled { @apply cursor-not-allowed hover:text-fg-2; }
+}
+
+@supports (appearance: base-select) {
+  select.field,
+  select.field::picker(select) { appearance: base-select; }
+  select.field {
+    @apply flex items-center gap-2;
+    background-image: none;
+    padding-right: 0.75rem;
+  }
+  select.field::picker-icon {
+    @apply ml-auto text-muted transition-transform;
+    content: "";
+    width: 16px;
+    height: 16px;
+    background: currentColor;
+    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") center / contain no-repeat;
+  }
+  select.field:open { @apply border-fg text-fg; }
+  select.field:open::picker-icon { rotate: 180deg; }
+  select.field::picker(select) {
+    @apply mt-1 max-h-80 min-w-[anchor-size(width)] overflow-y-auto rounded-[10px] border border-border-strong bg-surface p-1.5 text-[13px] text-fg;
+    box-shadow: 0 18px 48px rgb(0 0 0 / 0.22);
+  }
+  select.field option {
+    @apply flex min-h-9 cursor-pointer items-center gap-2.5 rounded-[7px] px-2.5 text-fg outline-none transition-colors;
+  }
+  select.field option:hover,
+  select.field option:focus-visible { @apply bg-subtle; }
+  select.field option:checked { @apply font-semibold; }
+  select.field option::checkmark { @apply order-1 ml-auto text-xs text-muted; content: "✓"; }
+  select.field option:disabled { @apply cursor-default text-muted opacity-60 hover:bg-transparent; }
+}
+
+@layer components {
   .kbd { @apply rounded border border-border bg-subtle px-1.5 py-0.5 font-mono text-2xs text-muted; }
   .num { font-variant-numeric: tabular-nums; }
   /* Cifras y títulos: Inter Tight con tracking cerrado. */
