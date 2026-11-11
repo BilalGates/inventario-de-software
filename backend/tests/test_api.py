@@ -440,3 +440,38 @@ def test_software_excel_by_department(client, engine):
                                                                              "department_id": it_id}).content))
     assert wb.sheetnames == ["IT", "Inventario de equipos"]
     assert wb["Inventario de equipos"].max_row == 4  # cabecera + título de IT + 2 equipos
+
+
+def test_fleet_health_causes_and_inventory_export(client, db):
+    import io
+    dev = client.post("/api/devices", json={"hostname": "PC-H1"}).json()
+    client.post("/api/runs/upload", data={"source": "panda", "device_id": str(dev["id"])},
+                files={"file": ("export.txt", PANDA.encode("utf-8"), "text/plain")})
+    drain(db)
+    sw = client.get(f"/api/devices/{dev['id']}/software").json()["items"]
+    anydesk = next(i for i in sw if i["name"] == "AnyDesk")
+    client.post("/api/software/bulk-update", json={"product_ids": [anydesk["product_id"]],
+                                                    "authorization_status": "unauthorized"})
+    types = {t["code"]: t["id"] for t in client.get("/api/devices/meta/types").json()}
+    client.post("/api/devices", json={"hostname": "=SRV-01", "device_type_id": types["server"]})
+
+    dash = client.get("/api/dashboard").json()
+    fleet = {f["name"]: f for f in dash["devices"]["fleet"]}
+    assert fleet["PC-H1"]["state"] == "alert" and fleet["PC-H1"]["unauthorized"] is True
+    assert fleet["=SRV-01"]["state"] == "infra"
+    h = dash["health"]
+    assert h["infra"] == 1 and h["unauthorized"] == 1 and h["clean"] == h["workstations"] - 1
+    assert dash["alerts"]["causes"][0]["name"] == "AnyDesk" and dash["alerts"]["causes"][0]["devices"] == 1
+    assert len(dash["alerts"]["weekly"]) == 8 and dash["alerts"]["weekly"][-1]["opened"] >= 1
+    assert any(q["name"] == "Google Chrome" for q in dash["software"]["queue"])
+
+    row = next(d for d in client.get("/api/devices", params={"q": "PC-H1"}).json()["items"])
+    assert (row["state"], row["unauthorized"]) == ("alert", True)
+
+    r = client.get("/api/inventory/export")
+    assert r.status_code == 200
+    wb = load_workbook(io.BytesIO(r.content))
+    assert wb.sheetnames[:2] == ["Resumen", "Catálogo de software"]
+    assert {"Instalaciones", "Inventario de equipos"} <= set(wb.sheetnames)
+    names = [c.value for c in wb["Inventario de equipos"]["A"] if c.value]
+    assert "'=SRV-01" in names  # fórmula neutralizada
