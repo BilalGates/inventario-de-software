@@ -254,3 +254,24 @@ export function ScreenHeader({ eyebrow, title, sub, actions }: { eyebrow: string
     </header>
   );
 }
+
+// ---------------------------------------------------------------- Agrupar por día
+const timeFmt = new Intl.DateTimeFormat("es-ES", { hour: "2-digit", minute: "2-digit" });
+const dayFmt = new Intl.DateTimeFormat("es-ES", { weekday: "long", day: "numeric", month: "long" });
+/** Las fechas de la API vienen en UTC sin zona. */
+export const utcDate = (v: string) => new Date(/Z|[+-]\d\d:?\d\d$/.test(v) ? v : `${v}Z`);
+export const hhmm = (v: string) => timeFmt.format(utcDate(v));
+
+/** Agrupa filas por día (en el orden en que llegan, el más reciente primero), con «Hoy» y «Ayer». */
+export function groupByDay<T>(rows: T[], at: (r: T) => string): { key: string; label: string; rows: T[] }[] {
+  const today = new Date().toDateString();
+  const yesterday = new Date(Date.now() - 864e5).toDateString();
+  const map = new Map<string, { label: string; rows: T[] }>();
+  rows.forEach((r) => {
+    const d = utcDate(at(r));
+    const key = d.toDateString();
+    const label = key === today ? "Hoy" : key === yesterday ? "Ayer" : dayFmt.format(d);
+    map.set(key, { label, rows: [...(map.get(key)?.rows ?? []), r] });
+  });
+  return [...map.entries()].map(([key, g]) => ({ key, label: g.label.charAt(0).toUpperCase() + g.label.slice(1), rows: g.rows }));
+}

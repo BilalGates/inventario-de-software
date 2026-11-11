@@ -5,7 +5,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { SnapshotBadge } from "@/components/badges";
 import { DataTable, type Column, type TableGroup } from "@/components/DataTable";
 import type { MenuEntry } from "@/components/ContextMenu";
-import { BigNum, FilterChips, HATCH, Kpi, KpiStrip, ScreenHeader, StackBar, StatusDot, Stepper, Swatch, type DotKind } from "@/components/kit";
+import { BigNum, FilterChips, HATCH, Kpi, KpiStrip, ScreenHeader, StackBar, StatusDot, Stepper, Swatch, groupByDay, hhmm, type DotKind } from "@/components/kit";
 import { Badge, Button, Card, EmptyState, Field, Modal, Notice, Segmented, Spinner, Tabs } from "@/components/ui";
 import { useDashboard, type DashboardData } from "@/lib/dashboard";
 import { api } from "@/lib/api";
@@ -67,7 +67,7 @@ function AuditSummary({ dash }: { dash: DashboardData }) {
         <p className="text-xs text-muted">{t.u} actualizaciones · {t.i} instalaciones · {t.r} bajas</p>
       </Kpi>
       <Kpi label={`Cierre de ${fmtPeriod(m.period).toLowerCase()}`}
-        footer={status === "approved" ? "Inventario aprobado" : daysLeft === 1 ? "Falta 1 día" : `Faltan ${daysLeft} días`}>
+        footer={status === "approved" ? "Cierre completado" : daysLeft === 1 ? "Falta 1 día" : `Faltan ${daysLeft} días`}>
         <BigNum value={PHASES[phase]} />
         <Stepper steps={PHASES} current={phase} />
       </Kpi>
@@ -241,29 +241,12 @@ function CompareDialog({ ids, onClose }: { ids: [number, number]; onClose: () =>
 }
 
 // ------------------------------------------------------------------ cambios
-const timeFmt = new Intl.DateTimeFormat("es-ES", { hour: "2-digit", minute: "2-digit" });
-const dayFmt = new Intl.DateTimeFormat("es-ES", { weekday: "long", day: "numeric", month: "long" });
-const utc = (v: string) => new Date(/Z|[+-]\d\d:?\d\d$/.test(v) ? v : `${v}Z`);
-const hhmm = (v: string) => timeFmt.format(utc(v));
 const CHANGE_DOT: Record<string, DotKind> = {
   software_installed: "ok", software_removed: "alert", software_version_changed: "muted", authorization_changed: "warning",
   device_added: "info", device_retired: "failed", device_reactivated: "ok", device_updated: "info", device_not_observed: "warning",
   department_changed: "info", user_changed: "info",
 };
 
-/** Agrupa filas por día (en el orden en que llegan, el más reciente primero), con «Hoy» y «Ayer». */
-function byDay<T>(rows: T[], at: (r: T) => string): TableGroup<T>[] {
-  const today = new Date().toDateString();
-  const yesterday = new Date(Date.now() - 864e5).toDateString();
-  const map = new Map<string, { label: string; rows: T[] }>();
-  rows.forEach((r) => {
-    const d = utc(at(r));
-    const key = d.toDateString();
-    const label = key === today ? "Hoy" : key === yesterday ? "Ayer" : dayFmt.format(d);
-    map.set(key, { label, rows: [...(map.get(key)?.rows ?? []), r] });
-  });
-  return [...map.entries()].map(([key, g]) => ({ key, label: g.label.charAt(0).toUpperCase() + g.label.slice(1), rows: g.rows }));
-}
 const CHANGE_GROUPS: Record<string, string> = {
   "": "Todos los cambios",
   "software_installed,software_removed,software_version_changed": "Software",
@@ -287,7 +270,7 @@ function Changes() {
   ];
   return (
     <DataTable columns={cols} rows={q.data?.items} total={q.data?.total} rowKey={(c) => c.id} loading={q.isLoading} error={q.error}
-      groups={byDay(q.data?.items ?? [], (c) => c.at)}
+      groups={groupByDay(q.data?.items ?? [], (c) => c.at)}
       rowMenu={(c) => ({ entries: [
         { label: "Abrir equipo", disabled: !c.device_id, onSelect: () => nav(`/dispositivos/${c.device_id}`) },
         { label: "Ver historial del equipo", disabled: !c.device_id, onSelect: () => nav(`/dispositivos/${c.device_id}?tab=historial`) },
@@ -504,7 +487,7 @@ function AuditLog() {
         <Button className="ml-auto" icon={<Download className="size-4" />} onClick={() => api.download("/audit/export", { format: "xlsx" })}>Exportar evidencias</Button>
       </div>
       <DataTable rows={q.data?.items} total={q.data?.total} rowKey={(e) => e.id} loading={q.isLoading} error={q.error}
-        groups={byDay(q.data?.items ?? [], (e) => e.at)}
+        groups={groupByDay(q.data?.items ?? [], (e) => e.at)}
         rowMenu={(e) => ({ entries: [
           { label: `Ver solo las acciones de ${e.actor}`, onSelect: () => set({ actor: e.actor }) },
           { label: "Copiar hash", onSelect: () => navigator.clipboard?.writeText(e.hash) },
