@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Archive, Pencil, RotateCcw, Upload } from "lucide-react";
 import { useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { AuthBadge, ComplianceBadge, DeviceStatusBadge, FreshnessBadge, SourceBadge } from "@/components/badges";
 import { CompliancePanel } from "@/components/CompliancePanel";
 import { DataTable, type Column } from "@/components/DataTable";
@@ -29,7 +29,9 @@ function Sourced({ d, field, children }: { d: Device; field: string; children: R
 export default function DeviceDetail() {
   const id = Number(useParams().id);
   const can = useCan();
-  const [tab, setTab] = useState<Tab>("resumen");
+  const initialTab = useSearchParams()[0].get("tab") as Tab | null;
+  const [tab, setTab] = useState<Tab>(initialTab && ["resumen", "hardware", "software", "asignaciones", "historial"].includes(initialTab)
+    ? initialTab : "resumen");
   const [editing, setEditing] = useState(false);
   const [retiring, setRetiring] = useState(false);
   const [uploading, setUploading] = useState(false);
