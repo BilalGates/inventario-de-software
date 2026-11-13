@@ -1,0 +1,28 @@
+{
+  "_nota": "Fuente única nivel → modelo por motor. Cambia aquí cuando salgan modelos nuevos.",
+  "claude": {
+    "barato": { "modelo": "claude-haiku-5-5" },
+    "medio": { "modelo": "claude-sonnet-5-5" },
+    "fuerte": { "modelo": "claude-opus-5-5" },
+    "maximo": { "modelo": "claude-fable-5-2" }
+  },
+  "codex": {
+    "barato": { "modelo": "gpt-6-sol", "esfuerzo": "low" },
+    "medio": { "modelo": "gpt-6-sol", "esfuerzo": "medium" },
+    "fuerte": { "modelo": "gpt-6-sol", "esfuerzo": "high" },
+    "maximo": { "modelo": "gpt-6-sol", "esfuerzo": "xhigh" }
+  },
+  "opencode": {
+    "_nota": "barato/medio gratis; fuerte/maximo necesitan saldo en OpenCode Zen",
+    "barato": { "modelo": "opencode/deepseek-v4.1-flash-free" },
+    "medio": { "modelo": "opencode/glm-5.3-flash-free" },
+    "fuerte": { "modelo": "opencode/gpt-5.5-pro" },
+    "maximo": { "modelo": "opencode/gpt-6-astra" }
+  },
+  "agy": {
+    "barato": { "modelo": "gemini-3.8-flash-low", "esfuerzo": "low" },
+    "medio": { "modelo": "gemini-3.8-flash-high", "esfuerzo": "medium" },
+    "fuerte": { "modelo": "claude-opus-4-6-thinking", "esfuerzo": "high" },
+    "maximo": { "modelo": "claude-opus-4-6-thinking", "esfuerzo": "max" }
+  }
+}

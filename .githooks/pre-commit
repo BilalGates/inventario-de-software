@@ -1,0 +1,3 @@
+#!/bin/sh
+node scripts/agentes/hooks/pre-commit.mjs
+exit 0
